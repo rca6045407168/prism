@@ -42,6 +42,10 @@ type Turn = {
   finalText: string;
   sessionId: string | null;
   errored: boolean;
+  /** Set true when WE called abort(). Prevents the close handler from
+   *  surfacing a "claude exited with code null" system message that's
+   *  noise from our own SIGTERM. (v0.1.11) */
+  aborted: boolean;
 };
 
 const activeTurns = new Map<string, Turn>();
@@ -182,6 +186,7 @@ function send(params: {
     finalText: "",
     sessionId: params.sessionId ?? null,
     errored: false,
+    aborted: false,
   };
   activeTurns.set(turnId, turn);
 
@@ -209,6 +214,11 @@ function send(params: {
       processLine(turn, turn.buffer);
       turn.buffer = "";
     }
+    // Suppress the close-as-error if WE aborted (SIGTERM gives code=null,
+    // which is correct termination, not a failure). v0.1.11 fix.
+    if (turn.aborted) {
+      return;
+    }
     if (code !== 0 && !turn.errored) {
       emit(params.window, "prism:chat:error", {
         turnId,
@@ -231,6 +241,7 @@ function send(params: {
 function abort(turnId: string): { ok: boolean } {
   const turn = activeTurns.get(turnId);
   if (!turn) return { ok: false };
+  turn.aborted = true; // mark BEFORE killing so close handler suppresses error
   try {
     turn.proc.kill("SIGTERM");
   } catch {
@@ -239,7 +250,7 @@ function abort(turnId: string): { ok: boolean } {
   activeTurns.delete(turnId);
   emit(turn.window, "prism:chat:end", {
     turnId,
-    finalText: turn.finalText + " [aborted]",
+    finalText: turn.finalText,
     sessionId: turn.sessionId,
   });
   return { ok: true };
