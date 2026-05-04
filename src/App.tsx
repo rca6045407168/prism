@@ -37,7 +37,7 @@ export function App() {
         if (!cfg.token) {
           if (!cancelled)
             setError(
-              "OpenClaw paired but no operator token found. Pair a desktop device in the OpenClaw dashboard.",
+              "Prism runtime paired but no operator token found. Re-run setup from the menu: Prism → Setup runtime…",
             );
           return;
         }
@@ -220,7 +220,7 @@ export function App() {
                 ? "first prompt\nsecond prompt\nthird prompt"
                 : client
                 ? "Ask anything…"
-                : "Connecting to OpenClaw…"
+                : "Starting Prism runtime…"
             }
             rows={batchMode ? 5 : 1}
           />

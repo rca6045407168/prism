@@ -1,6 +1,6 @@
 {
   "name": "prism",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Prism — type N prompts, get N parallel agents, reconciled into one answer.",
   "author": {
     "name": "Richard Chen",
@@ -22,7 +22,7 @@
   "build": {
     "appId": "ai.prism.agent",
     "productName": "Prism",
-    "copyright": "Copyright © 2026 Richard Chen. Built on the OpenClaw open-source gateway (MIT).",
+    "copyright": "Copyright © 2026 Richard Chen. Includes open-source components — see Credits.",
     "directories": {
       "output": "release",
       "buildResources": "build"
@@ -45,7 +45,7 @@
       "gatekeeperAssess": false,
       "identity": null,
       "extendInfo": {
-        "NSAppleEventsUsageDescription": "Prism needs to communicate with the local OpenClaw gateway."
+        "NSAppleEventsUsageDescription": "Prism needs to communicate with its local agent runtime."
       }
     },
     "dmg": {

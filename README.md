@@ -1,67 +1,75 @@
 # Prism
 
-Branded desktop client for the [OpenClaw](https://github.com/openclaw/openclaw)
-gateway. Talks to a locally-running OpenClaw daemon over WebSocket.
+> Type N prompts. Get N parallel agents. Reconciled into one answer.
 
-Adds on top of the upstream dashboard:
-
-- **Batch mode** — fan out N prompts to N parallel agents in one submit
-- **Auto model selection** — cheap/standard/reasoning routing per prompt
-- **Prism branding + auto-update** — versioned releases via GitHub, no
-  manual upgrades required
+Prism is a desktop AI agent platform. Unlike chat-first tools, Prism is built
+around **parallel batch input** — you submit multiple prompts at once, they
+fan out to N parallel agents, and the results come back as one synthesized
+answer. Auto-routes across multiple model vendors (Anthropic, OSS, local)
+based on prompt complexity. Runs on your machine.
 
 ## Install
 
-Download the latest `.dmg` from
+Download the latest `Prism-x.y.z.dmg` from
 [Releases](https://github.com/rca6045407168/prism/releases/latest)
 and drag to Applications.
 
-First launch will say "Prism can't be opened because it's from
-an unidentified developer" — Right-click → Open → Open. (Code signing
-ships in v0.2.)
-
-Requires OpenClaw to be installed and paired:
-
-```bash
-brew install openclaw
-openclaw configure   # one-time pair
-```
+First launch will show "Prism can't be opened because it's from an
+unidentified developer" — Right-click → Open → Open. (One-time bypass;
+code signing ships in v0.2.)
 
 ## Auto-update
 
-Every launch checks GitHub Releases. When a new version is available,
-a banner appears. One click downloads + restarts.
+Every launch checks Releases. When a new version is available, a banner
+appears in the app. One click downloads + restarts. No reinstall needed.
+
+## Status
+
+**v0.1 (current):** chat window, batch mode (⌘B), auto-update, brand
+shell. Requires manual one-time setup of the agent runtime — see
+v0.2 below for the auto-installer.
+
+**v0.2 (in progress):**
+
+- One-click auto-installer for the agent runtime (no terminal commands)
+- First-launch onboarding scanner that imports existing skills, memory,
+  vault from your machine
+- Stripe payment integration
+- Streaming token deltas in chat
+
+**v1.0:**
+
+- Code signing + notarization (no Gatekeeper warning)
+- Bundled runtime (zero external dependencies)
+- Multi-tenant support (per-employee brain)
+- Customer skill marketplace
 
 ## Develop
 
 ```bash
 npm install
-npm run dev          # vite dev server (http://localhost:5173)
+npm run dev          # vite dev server
 npm start            # electron app pointing at dev server
 
 npm run dist         # build .dmg locally without publishing
 ```
 
-## Build a release
+## Cut a release
 
 ```bash
-# bump version in package.json, then:
+# bump version in package.json
 git tag v0.2.0
 git push --tags
 ```
 
 GitHub Actions builds the `.dmg` and publishes to Releases.
-electron-updater on installed clients auto-discovers within ~24h
-(or immediately on next launch / manual "Check for Updates…").
+electron-updater on installed clients auto-discovers the next time
+they check (within ~24h, or immediately on next launch).
 
-## Upstream tracking
+## Credits
 
-`.github/workflows/daily-upstream-watch.yml` opens an issue when the
-[OpenClaw](https://github.com/openclaw/openclaw) repo cuts a new release
-that we haven't tracked. We don't auto-rebase — daemon behavior changes
-need human review. The current pinned upstream version lives in
-`.upstream-version`.
+Built on top of open-source components. See [ATTRIBUTION.md](./ATTRIBUTION.md).
 
 ## License
 
-MIT. Built on top of OpenClaw (also MIT). See LICENSE and ATTRIBUTION.md.
+MIT.

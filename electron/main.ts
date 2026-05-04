@@ -3,8 +3,10 @@
  *
  * Responsibilities:
  *  - Open the chat window (loads the Vite-built React UI).
- *  - Read OpenClaw gateway URL + operator token from local install
- *    (~/.openclaw/devices/paired.json + http://127.0.0.1:18789).
+ *  - Discover the local Prism runtime (the agent daemon) — currently
+ *    looks at the legacy ~/.openclaw/ pair file (the runtime is forked
+ *    from OpenClaw upstream; we will rename the on-disk paths to
+ *    ~/.prism/ in v0.2 once the auto-installer is in place).
  *  - Bridge those secrets to the renderer via ipcMain so the UI never
  *    has to read filesystem.
  *  - Run electron-updater on launch — checks GitHub Releases, prompts on
@@ -27,14 +29,15 @@ autoUpdater.autoInstallOnAppQuit = true;
 
 function gatewayConfig(): { url: string; token: string | null; error?: string } {
   const url = "ws://127.0.0.1:18789";
+  // Runtime pair file is currently still at the legacy ~/.openclaw/ path.
+  // v0.2 auto-installer will move it to ~/.prism/.
   const pairedPath = path.join(os.homedir(), ".openclaw", "devices", "paired.json");
   if (!fs.existsSync(pairedPath)) {
     return {
       url,
       token: null,
       error:
-        "OpenClaw not installed (no ~/.openclaw/devices/paired.json). " +
-        "Install OpenClaw first: brew install openclaw && openclaw configure",
+        "Prism runtime not yet installed. The first-launch installer will set it up automatically in v0.1.1 — for v0.1, please reach out for manual setup steps.",
     };
   }
   try {
@@ -191,12 +194,20 @@ function buildMenu() {
       role: "help",
       submenu: [
         {
-          label: "OpenClaw on GitHub",
-          click: () => shell.openExternal("https://github.com/openclaw/openclaw"),
-        },
-        {
           label: "Prism on GitHub",
           click: () => shell.openExternal("https://github.com/rca6045407168/prism"),
+        },
+        {
+          label: "Report an Issue",
+          click: () =>
+            shell.openExternal("https://github.com/rca6045407168/prism/issues/new"),
+        },
+        {
+          label: "Credits",
+          click: () =>
+            shell.openExternal(
+              "https://github.com/rca6045407168/prism/blob/main/ATTRIBUTION.md",
+            ),
         },
       ],
     },
