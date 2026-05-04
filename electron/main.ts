@@ -26,6 +26,7 @@ import {
   removeEntry,
   clearAll,
 } from "./profile-store";
+import { listCommands, refreshCommandsCache } from "./commands";
 
 // ---------- logging ----------
 log.transports.file.level = "info";
@@ -123,6 +124,13 @@ ipcMain.handle("prism:profile:removeEntry", (_e, id: string) => {
 ipcMain.handle("prism:profile:clearAll", () => {
   clearAll();
   return loadProfile();
+});
+
+// ---------- slash commands / skills (v0.1.18) ----------
+ipcMain.handle("prism:commands:list", () => listCommands());
+ipcMain.handle("prism:commands:refresh", () => {
+  refreshCommandsCache();
+  return listCommands();
 });
 ipcMain.handle("flexhaul:checkForUpdates", async () => {
   try {

@@ -61,6 +61,35 @@ function emit(window: BrowserWindow, channel: string, payload: unknown) {
   }
 }
 
+function stringifyToolInput(input: unknown): string {
+  if (input == null) return "";
+  if (typeof input === "string") return input.slice(0, 200);
+  try {
+    const json = JSON.stringify(input);
+    return json.length > 200 ? json.slice(0, 197) + "…" : json;
+  } catch {
+    return "";
+  }
+}
+
+function stringifyToolResult(content: unknown): string {
+  if (content == null) return "";
+  if (typeof content === "string") return content.slice(0, 600);
+  if (Array.isArray(content)) {
+    // claude returns content as [{type:"text",text:"..."}] sometimes
+    const text = content
+      .map((c) => (c?.type === "text" && typeof c.text === "string" ? c.text : ""))
+      .filter(Boolean)
+      .join("\n");
+    return text.slice(0, 600);
+  }
+  try {
+    return JSON.stringify(content).slice(0, 600);
+  } catch {
+    return "";
+  }
+}
+
 /**
  * Parse the stream-json line. Returns `null` if not a JSON object we care
  * about. Otherwise classifies into UI events.
@@ -114,22 +143,47 @@ function processLine(turn: Turn, line: string): void {
   }
 
   if (type === "assistant" && parsed.message?.content) {
-    // The assistant message's content is an array of {type:"text",text:"..."}
-    // We treat the FULL text (we don't get per-token deltas from stream-json
-    // directly for non-thinking output — only the full assistant message
-    // arrives). For visual streaming we synthesize deltas by diffing
-    // current text vs accumulated finalText.
     const blocks = parsed.message.content;
     let combined = "";
     for (const b of blocks) {
       if (b.type === "text" && typeof b.text === "string") {
         combined += b.text;
+      } else if (b.type === "tool_use") {
+        // v0.1.18: surface tool calls to the UI so the user can see what
+        // claude is doing while a turn is in flight (Manus-style live
+        // progress). Friendly-name + truncated input preview.
+        emit(turn.window, "prism:chat:tool", {
+          turnId: turn.turnId,
+          phase: "use",
+          toolUseId: String(b.id ?? ""),
+          name: String(b.name ?? "tool"),
+          inputPreview: stringifyToolInput(b.input),
+        });
       }
     }
     if (combined.length > turn.finalText.length) {
       const delta = combined.slice(turn.finalText.length);
       turn.finalText = combined;
       emit(turn.window, "prism:chat:delta", { turnId: turn.turnId, text: delta });
+    }
+    return;
+  }
+
+  // v0.1.18: tool results arrive as `user` messages with content blocks
+  // of type `tool_result`. We mirror them up to the UI so the inline
+  // pill can flip from "running" → "done" with a result snippet.
+  if (type === "user" && parsed.message?.content) {
+    const blocks = parsed.message.content;
+    for (const b of blocks) {
+      if (b.type === "tool_result") {
+        emit(turn.window, "prism:chat:tool", {
+          turnId: turn.turnId,
+          phase: "result",
+          toolUseId: String(b.tool_use_id ?? ""),
+          isError: !!b.is_error,
+          resultPreview: stringifyToolResult(b.content),
+        });
+      }
     }
     return;
   }

@@ -35,6 +35,13 @@ type ProfileData = {
   updated_at: string;
 };
 
+type DiscoveredCommand = {
+  name: string;
+  description: string;
+  source: "command" | "skill";
+  filePath: string;
+};
+
 declare global {
   interface Window {
     flexhaul: {
@@ -102,6 +109,17 @@ declare global {
         onError: (
           cb: (ev: { turnId: string; error: string; sessionExpired?: boolean }) => void,
         ) => () => void;
+        onTool: (
+          cb: (ev: {
+            turnId: string;
+            phase: "use" | "result";
+            toolUseId: string;
+            name?: string;
+            inputPreview?: string;
+            isError?: boolean;
+            resultPreview?: string;
+          }) => void,
+        ) => () => void;
       };
       profile: {
         get: () => Promise<ProfileData>;
@@ -109,6 +127,10 @@ declare global {
         removeEntry: (id: string) => Promise<ProfileData>;
         clearAll: () => Promise<ProfileData>;
         onPending: (cb: (ev: { turnId: string }) => void) => () => void;
+      };
+      commands: {
+        list: () => Promise<DiscoveredCommand[]>;
+        refresh: () => Promise<DiscoveredCommand[]>;
       };
     };
   }

@@ -17,11 +17,22 @@
  * is provided.
  */
 
+export type ToolEvent = {
+  toolUseId: string;
+  name: string;
+  inputPreview?: string;
+  resultPreview?: string;
+  isError?: boolean;
+  status: "running" | "done" | "error";
+};
+
 export type ChatMessage = {
   role: "user" | "assistant" | "system";
   text: string;
   batch?: boolean;
   batchCount?: number;
+  /** Tool calls observed during this assistant turn. v0.1.18. */
+  tools?: ToolEvent[];
 };
 
 export type StreamEvent =

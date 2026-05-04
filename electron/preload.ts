@@ -53,6 +53,18 @@ contextBridge.exposeInMainWorld("flexhaul", {
       ipcRenderer.on("prism:chat:error", listener);
       return () => ipcRenderer.removeListener("prism:chat:error", listener);
     },
+    // v0.1.18: live tool-progress events
+    onTool: (cb: (ev: any) => void) => {
+      const listener = (_: unknown, ev: any) => cb(ev);
+      ipcRenderer.on("prism:chat:tool", listener);
+      return () => ipcRenderer.removeListener("prism:chat:tool", listener);
+    },
+  },
+
+  // Slash commands / skills discovery (v0.1.18)
+  commands: {
+    list: () => ipcRenderer.invoke("prism:commands:list"),
+    refresh: () => ipcRenderer.invoke("prism:commands:refresh"),
   },
 
   // Auto-profile (v0.1.17) — local-only, silent learning of user

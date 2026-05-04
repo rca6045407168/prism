@@ -7,6 +7,14 @@ import { SettingsModal, loadSettings, saveSettings, MODEL_OPTIONS, Settings } fr
 import { Message } from "./Message";
 import { Sidebar } from "./Sidebar";
 import {
+  SlashCommandMenu,
+  filterCommands,
+  commandAt,
+  visibleCommandCount,
+} from "./SlashCommandMenu";
+import { ArtifactPane } from "./ArtifactPane";
+import { Artifact, extractArtifacts } from "./artifacts";
+import {
   Chat,
   listChats,
   createChat,
@@ -43,6 +51,16 @@ export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [memoryPending, setMemoryPending] = useState(false);
 
+  // Slash commands (v0.1.18)
+  const [commands, setCommands] = useState<DiscoveredCommand[]>([]);
+  const [slashOpen, setSlashOpen] = useState(false);
+  const [slashQuery, setSlashQuery] = useState("");
+  const [slashIndex, setSlashIndex] = useState(0);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
+
+  // Active artifact preview (v0.1.18)
+  const [activeArtifact, setActiveArtifact] = useState<Artifact | null>(null);
+
   // Multi-chat state (v0.1.5)
   const [chats, setChats] = useState<Chat[]>(() => {
     migrateLegacyChat();
@@ -75,6 +93,74 @@ export function App() {
     if (settings.theme === "system") root.removeAttribute("data-theme");
     else root.setAttribute("data-theme", settings.theme);
   }, [settings.theme]);
+
+  // Load slash commands once at startup; refresh on focus to pick up
+  // newly-added skills without restarting the app.
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const list = await window.flexhaul.commands.list();
+        if (!cancelled) setCommands(list);
+      } catch {
+        /* ignore — empty list is fine */
+      }
+    };
+    load();
+    const onFocus = () => {
+      window.flexhaul.commands.refresh().then((l) => {
+        if (!cancelled) setCommands(l);
+      }).catch(() => {});
+    };
+    window.addEventListener("focus", onFocus);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("focus", onFocus);
+    };
+  }, []);
+
+  // Parse the current input to decide whether the slash menu should
+  // be visible. It opens when the input STARTS with `/` and the user
+  // is still typing the command name (no space yet).
+  useEffect(() => {
+    if (input.startsWith("/")) {
+      const m = input.match(/^\/([a-zA-Z0-9_-]*)$/);
+      if (m) {
+        setSlashOpen(true);
+        setSlashQuery(m[1]);
+        return;
+      }
+    }
+    setSlashOpen(false);
+    setSlashQuery("");
+    setSlashIndex(0);
+  }, [input]);
+
+  // Clamp the selected index when the visible list shrinks
+  useEffect(() => {
+    if (!slashOpen) return;
+    const visible = visibleCommandCount(slashQuery, commands);
+    if (slashIndex >= visible && visible > 0) setSlashIndex(visible - 1);
+  }, [slashOpen, slashQuery, commands, slashIndex]);
+
+  const acceptSlash = useCallback(
+    (cmd: DiscoveredCommand) => {
+      setInput(`/${cmd.name} `);
+      setSlashOpen(false);
+      setSlashQuery("");
+      setSlashIndex(0);
+      // Defer focus until React has flushed the new value, so the
+      // textarea's caret lands at the end.
+      requestAnimationFrame(() => {
+        const el = composerRef.current;
+        if (!el) return;
+        el.focus();
+        const len = el.value.length;
+        el.setSelectionRange(len, len);
+      });
+    },
+    [],
+  );
 
   // Persist active chat id
   useEffect(() => {
@@ -247,12 +333,47 @@ export function App() {
       setMemoryPending(true);
     });
 
+    // v0.1.18: live tool-progress events. We attach them to the most
+    // recent assistant message (the one currently being streamed).
+    const offTool = window.flexhaul.chat.onTool((ev) => {
+      updateActiveMessages((prev) => {
+        if (prev.length === 0) return prev;
+        const lastIdx = prev.length - 1;
+        const last = prev[lastIdx];
+        if (last.role !== "assistant") return prev;
+
+        const tools = last.tools ? [...last.tools] : [];
+        if (ev.phase === "use") {
+          tools.push({
+            toolUseId: ev.toolUseId,
+            name: ev.name ?? "tool",
+            inputPreview: ev.inputPreview,
+            status: "running",
+          });
+        } else if (ev.phase === "result") {
+          const idx = tools.findIndex((t) => t.toolUseId === ev.toolUseId);
+          if (idx >= 0) {
+            tools[idx] = {
+              ...tools[idx],
+              resultPreview: ev.resultPreview,
+              isError: !!ev.isError,
+              status: ev.isError ? "error" : "done",
+            };
+          }
+        }
+        const next = [...prev];
+        next[lastIdx] = { ...last, tools };
+        return next;
+      });
+    });
+
     return () => {
       offStart();
       offDelta();
       offEnd();
       offError();
       offPending();
+      offTool();
     };
   }, [activeId, updateActiveMessages]);
 
@@ -391,6 +512,33 @@ export function App() {
   }, [activeTurnId]);
 
   const onTextareaKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Slash command navigation has highest priority when the menu is open.
+    if (slashOpen) {
+      const visible = visibleCommandCount(slashQuery, commands);
+      if (visible > 0) {
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          setSlashIndex((i) => (i + 1) % visible);
+          return;
+        }
+        if (e.key === "ArrowUp") {
+          e.preventDefault();
+          setSlashIndex((i) => (i - 1 + visible) % visible);
+          return;
+        }
+        if (e.key === "Enter" || e.key === "Tab") {
+          e.preventDefault();
+          const c = commandAt(slashQuery, commands, slashIndex);
+          if (c) acceptSlash(c);
+          return;
+        }
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setSlashOpen(false);
+        return;
+      }
+    }
     if (e.key === "Enter" && !e.shiftKey && !batchMode) {
       e.preventDefault();
       send();
@@ -439,7 +587,7 @@ export function App() {
         onSearchChange={setSearchQuery}
       />
 
-      <div className="main-pane">
+      <div className={`main-pane${activeArtifact ? " has-artifact" : ""}`}>
         <div className="titlebar">
           <span className="brand">PRISM</span>
           <span className="brand-version">v{version}</span>
@@ -525,13 +673,31 @@ export function App() {
                     }
                   }
                 : undefined;
+            const messageArtifacts =
+              m.role === "assistant" ? extractArtifacts(m.text, `m-${i}`) : [];
             return (
-              <Message key={i} message={m} streaming={isStreaming} onEdit={onEdit} />
+              <Message
+                key={i}
+                message={m}
+                streaming={isStreaming}
+                onEdit={onEdit}
+                artifacts={messageArtifacts}
+                onOpenArtifact={setActiveArtifact}
+                activeArtifactId={activeArtifact?.id ?? null}
+              />
             );
           })}
         </div>
 
         <div className={`composer ${batchMode ? "batch-active" : ""}`}>
+          <SlashCommandMenu
+            open={slashOpen}
+            query={slashQuery}
+            commands={commands}
+            selectedIndex={slashIndex}
+            onSelect={acceptSlash}
+            onHoverIndex={setSlashIndex}
+          />
           <div className="composer-hint">
             <span>
               {batchMode
@@ -569,6 +735,7 @@ export function App() {
           </div>
           <div className="composer-row">
             <textarea
+              ref={composerRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={onTextareaKey}
@@ -608,6 +775,13 @@ export function App() {
           </div>
         </div>
       </div>
+
+      {activeArtifact ? (
+        <ArtifactPane
+          artifact={activeArtifact}
+          onClose={() => setActiveArtifact(null)}
+        />
+      ) : null}
     </div>
   );
 }
