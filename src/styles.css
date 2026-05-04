@@ -615,13 +615,21 @@ html[data-theme="dark"] {
   position: relative;
 }
 
+/* v0.1.10: edit button now floats below the bubble instead of off the side
+   (which got clipped by .chat overflow). Less Apple-elegant but visible. */
+.msg.user {
+  margin-bottom: 4px;
+}
+
 .msg.user .msg-edit {
   position: absolute;
-  top: 4px;
-  right: -32px;
-  width: 24px;
-  height: 24px;
-  font-size: 12px;
+  bottom: -22px;
+  right: 0;
+  width: auto;
+  padding: 2px 8px;
+  height: 20px;
+  font-family: var(--mono);
+  font-size: 10.5px;
   color: var(--ink-mute);
   border: 1px solid var(--border);
   border-radius: 5px;
@@ -631,10 +639,17 @@ html[data-theme="dark"] {
   justify-content: center;
   opacity: 0;
   transition: opacity 100ms ease;
+  white-space: nowrap;
+  z-index: 2;
 }
 
 .msg.user:hover .msg-edit {
   opacity: 1;
+}
+
+.msg.user .msg-edit:hover {
+  color: var(--ink);
+  border-color: var(--border-strong);
 }
 
 .msg.user .msg-edit:hover {

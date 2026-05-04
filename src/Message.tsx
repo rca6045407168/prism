@@ -126,9 +126,9 @@ export function Message({ message, streaming = false, onEdit }: Props) {
           <button
             className="msg-edit"
             onClick={startEdit}
-            title="Edit and regenerate"
+            title="Edit and regenerate from this point"
           >
-            ✎
+            ✎ Edit
           </button>
         )}
       </div>

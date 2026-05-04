@@ -145,6 +145,13 @@ function send(params: {
     "--output-format", "stream-json",
     "--verbose",
     "--setting-sources", "user",
+    // v0.1.10: needed for MCP tools to actually run. Without this, the
+    // default permission mode prompts via stdin which we can't answer
+    // (no TTY), so any tool call returns "I need permission". Tradeoff:
+    // tools run without confirmation. Future v0.2 adds an in-app permission
+    // dialog routed via --permission-prompt-tool.
+    "--permission-mode", "bypassPermissions",
+    "--allow-dangerously-skip-permissions",
   ];
   if (params.model && params.model !== "auto") {
     args.push("--model", params.model);

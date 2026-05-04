@@ -115,18 +115,8 @@ export function SettingsModal({ open, onClose, onChange, current }: Props) {
             </select>
           </div>
 
-          <div className="settings-row">
-            <label>Gateway URL</label>
-            <input
-              type="text"
-              value={draft.gatewayUrl}
-              onChange={(e) => setDraft({ ...draft, gatewayUrl: e.target.value })}
-              placeholder="ws://127.0.0.1:18789"
-            />
-            <span className="settings-hint">
-              Default. Change only if your runtime is on a different host/port.
-            </span>
-          </div>
+          {/* Gateway URL removed in v0.1.10 — chat now spawns claude CLI
+              directly (not the WS gateway). The setting was dead. */}
 
           <div className="settings-row settings-row-toggle">
             <label>
@@ -137,6 +127,16 @@ export function SettingsModal({ open, onClose, onChange, current }: Props) {
               />
               Show estimated cost per turn
             </label>
+          </div>
+
+          <div className="settings-row">
+            <label>Tools &amp; integrations</label>
+            <span className="settings-hint">
+              Prism inherits all MCP servers configured in your Claude CLI
+              setup (Gmail, Drive, Calendar, Sentry, etc.). To add or remove
+              servers, run <code>claude mcp</code> in your terminal — changes
+              apply on the next chat turn.
+            </span>
           </div>
         </div>
 
