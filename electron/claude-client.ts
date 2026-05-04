@@ -148,12 +148,11 @@ function send(params: {
     "--print",
     "--output-format", "stream-json",
     "--verbose",
-    "--setting-sources", "user",
-    // v0.1.10: needed for MCP tools to actually run. Without this, the
-    // default permission mode prompts via stdin which we can't answer
-    // (no TTY), so any tool call returns "I need permission". Tradeoff:
-    // tools run without confirmation. Future v0.2 adds an in-app permission
-    // dialog routed via --permission-prompt-tool.
+    // v0.1.13: don't pass --setting-sources at all. The previous "user"
+    // restriction excluded project-level MCP configs and broke claude.ai
+    // cloud MCPs (Gmail, Calendar, Drive, etc.) that come from default
+    // settings. Letting claude use its default config-discovery makes the
+    // spawned process inherit the same MCP servers as the terminal does.
     "--permission-mode", "bypassPermissions",
     "--allow-dangerously-skip-permissions",
   ];
@@ -168,11 +167,45 @@ function send(params: {
   // a positional arg. Pass directly.
   args.push(params.message);
 
+  // v0.1.12: Electron apps launched from Finder inherit a minimal PATH
+  // ("/usr/bin:/bin:/usr/sbin:/sbin") that excludes Homebrew + per-user
+  // node installations. This breaks MCP plugins (e.g. WozCode requires
+  // node >= 20.10 which lives at /opt/homebrew/bin/node or
+  // /usr/local/bin/node). Force-augment PATH so claude's spawned plugins
+  // and MCP servers find the binaries they need.
+  const HOME = process.env.HOME ?? "";
+  const augmentedPath = [
+    `${HOME}/.openclaw/bin`,
+    `${HOME}/.local/bin`,
+    `${HOME}/.npm-global/bin`,
+    `${HOME}/bin`,
+    "/opt/homebrew/bin",
+    "/opt/homebrew/sbin",
+    "/usr/local/opt/node/bin",
+    "/usr/local/bin",
+    "/usr/local/sbin",
+    process.env.PATH ?? "",
+    "/usr/bin",
+    "/bin",
+    "/usr/sbin",
+    "/sbin",
+  ]
+    .filter(Boolean)
+    .join(":");
+
   let proc: ChildProcess;
   try {
     proc = spawn(claudeBin, args, {
       stdio: ["ignore", "pipe", "pipe"],
-      env: process.env,
+      // v0.1.13: set cwd to HOME. Electron's default cwd is "/" which makes
+      // claude's project-level config discovery fail (it looks for .claude/
+      // or CLAUDE.md walking up from cwd). HOME mirrors what a fresh terminal
+      // would have on first launch.
+      cwd: HOME || undefined,
+      env: {
+        ...process.env,
+        PATH: augmentedPath,
+      },
     });
   } catch (e: any) {
     return { error: `Failed to spawn claude: ${e.message ?? String(e)}` };
