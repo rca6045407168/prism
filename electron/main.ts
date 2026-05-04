@@ -18,6 +18,7 @@ import log from "electron-log";
 import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
+import { registerSetup } from "./setup";
 
 // ---------- logging ----------
 log.transports.file.level = "info";
@@ -220,6 +221,7 @@ function buildMenu() {
 app.whenReady().then(() => {
   createWindow();
   buildMenu();
+  registerSetup(() => mainWindow);
 
   // Kick off update check 5s after launch (non-blocking)
   setTimeout(() => {

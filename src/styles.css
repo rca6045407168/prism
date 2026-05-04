@@ -131,6 +131,21 @@ textarea, input {
   margin-left: 4px;
 }
 
+.titlebar-clear {
+  -webkit-app-region: no-drag;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-mute);
+  padding: 3px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+}
+
+.titlebar-clear:hover {
+  background: var(--bg-input);
+  color: var(--ink-soft);
+}
+
 /* ── Banners ──────────────────────────────────────────────────── */
 
 .update-banner {
@@ -400,6 +415,212 @@ textarea, input {
   font-size: 10px;
   margin: 0 2px;
   color: var(--ink-soft);
+}
+
+/* ── Setup wizard ───────────────────────────────────────── */
+
+.setup-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  -webkit-app-region: drag;
+}
+
+.setup-card {
+  -webkit-app-region: no-drag;
+  width: 460px;
+  max-width: 90vw;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 32px 32px 28px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.06);
+}
+
+.setup-card .prism-mark {
+  width: 56px;
+  height: 56px;
+  background: var(--spectrum);
+  clip-path: polygon(50% 5%, 95% 95%, 5% 95%);
+}
+
+.setup-card h1 {
+  font-family: var(--mono);
+  font-size: 22px;
+  font-weight: 600;
+  background: var(--spectrum);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  letter-spacing: -0.02em;
+  margin: 4px 0 0;
+}
+
+.setup-tag {
+  text-align: center;
+  color: var(--ink-soft);
+  font-size: 13.5px;
+  line-height: 1.5;
+  margin-bottom: 8px;
+  max-width: 380px;
+}
+
+.setup-steps {
+  width: 100%;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0;
+  margin: 8px 0 4px;
+}
+
+.setup-step {
+  display: grid;
+  grid-template-columns: 22px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 13.5px;
+  transition: all 150ms ease;
+}
+
+.setup-step-icon {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--mono);
+  font-size: 14px;
+  border-radius: 50%;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--ink-mute);
+  flex-shrink: 0;
+}
+
+.setup-step-label {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.setup-step-detail {
+  grid-column: 1 / -1;
+  margin-left: 32px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-mute);
+  word-break: break-word;
+}
+
+.setup-step-running .setup-step-icon {
+  background: var(--bg-card);
+  border-color: var(--ink-soft);
+  color: var(--ink);
+  animation: setup-spin 1.4s linear infinite;
+}
+
+@keyframes setup-spin {
+  to { transform: rotate(360deg); }
+}
+
+.setup-step-ok .setup-step-icon {
+  background: #4ac29a;
+  border-color: #4ac29a;
+  color: white;
+}
+
+.setup-step-error {
+  border-color: #fca5a5;
+}
+.setup-step-error .setup-step-icon {
+  background: #ef4444;
+  border-color: #ef4444;
+  color: white;
+}
+
+.setup-step-needs-action .setup-step-icon {
+  background: #ffd23f;
+  border-color: #ffd23f;
+  color: var(--ink);
+}
+
+.setup-step-action {
+  background: var(--ink);
+  color: var(--bg);
+  padding: 4px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.setup-error {
+  width: 100%;
+  background: #fef2f2;
+  color: #991b1b;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  border: 1px solid #fee2e2;
+}
+
+@media (prefers-color-scheme: dark) {
+  .setup-error {
+    background: #2a1a1a;
+    color: #fca5a5;
+    border-color: #4a2020;
+  }
+}
+
+.setup-actions {
+  margin-top: 8px;
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+
+.setup-primary {
+  background: var(--ink);
+  color: var(--bg);
+  padding: 10px 28px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.setup-running, .setup-done {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
+.setup-done {
+  color: #4ac29a;
+  font-weight: 500;
+}
+
+.setup-fine {
+  font-size: 11.5px;
+  color: var(--ink-mute);
+  text-align: center;
+  margin-top: 4px;
+  line-height: 1.5;
+}
+
+.setup-fine a {
+  color: var(--ink-soft);
+  text-decoration: underline;
 }
 
 /* ── Scrollbar polish ───────────────────────────────────── */

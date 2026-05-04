@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { GatewayClient, ChatMessage } from "./gateway";
+import { SetupWizard } from "./SetupWizard";
 
 type UpdateState =
   | { kind: "idle" }
@@ -15,20 +16,50 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [version, setVersion] = useState<string>("");
   const [updateState, setUpdateState] = useState<UpdateState>({ kind: "idle" });
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  // Persist chat history across launches (v0.1.2). Loaded synchronously on
+  // first render so users don't see the empty state flash.
+  const [messages, setMessages] = useState<ChatMessage[]>(() => {
+    try {
+      const raw = localStorage.getItem("prism.chat.v1");
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed.slice(-500) : []; // hard cap to avoid runaway
+    } catch {
+      return [];
+    }
+  });
   const [input, setInput] = useState("");
   const [batchMode, setBatchMode] = useState(false);
   const [sending, setSending] = useState(false);
+  const [setupNeeded, setSetupNeeded] = useState<boolean | null>(null);
   const chatRef = useRef<HTMLDivElement>(null);
 
-  // Boot
+  // Pre-boot: check if first-launch setup is needed
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
         const v = await window.flexhaul.getAppVersion();
         if (!cancelled) setVersion(v);
+        const status = await window.flexhaul.setup.status();
+        const reachable = await Promise.resolve(status.daemonReachable);
+        if (cancelled) return;
+        // Setup needed if either: runtime missing, not paired, or daemon down
+        setSetupNeeded(!status.runtimeInstalled || !status.paired || !reachable);
+      } catch {
+        if (!cancelled) setSetupNeeded(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
+  // Boot the gateway client only when setup is complete
+  const bootGateway = useCallback(() => {
+    let cancelled = false;
+    (async () => {
+      try {
         const cfg = await window.flexhaul.getGatewayConfig();
         if (cfg.error) {
           if (!cancelled) setError(cfg.error);
@@ -52,7 +83,17 @@ export function App() {
         if (!cancelled) setError(`Failed to connect: ${e.message ?? String(e)}`);
       }
     })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
+  useEffect(() => {
+    if (setupNeeded === false) return bootGateway();
+  }, [setupNeeded, bootGateway]);
+
+  // Update events (always wired)
+  useEffect(() => {
     const off = [
       window.flexhaul.onUpdateEvent("checking", () => setUpdateState({ kind: "checking" })),
       window.flexhaul.onUpdateEvent("available", (info: any) =>
@@ -66,17 +107,30 @@ export function App() {
       ),
       window.flexhaul.onUpdateEvent("not-available", () => setUpdateState({ kind: "idle" })),
     ];
-
-    return () => {
-      cancelled = true;
-      off.forEach((fn) => fn());
-    };
+    return () => off.forEach((fn) => fn());
   }, []);
 
-  // Auto-scroll
+  // Auto-scroll + persist on every change
   useEffect(() => {
     if (chatRef.current) chatRef.current.scrollTop = chatRef.current.scrollHeight;
+    try {
+      localStorage.setItem("prism.chat.v1", JSON.stringify(messages.slice(-500)));
+    } catch {
+      // localStorage may be full; silently drop persistence rather than crash
+    }
   }, [messages]);
+
+  const clearChat = useCallback(() => {
+    if (messages.length === 0) return;
+    if (
+      window.confirm(
+        `Clear ${messages.length} messages? This deletes the local chat history. The conversation on the server side is unaffected.`,
+      )
+    ) {
+      setMessages([]);
+      localStorage.removeItem("prism.chat.v1");
+    }
+  }, [messages.length]);
 
   // Cmd+B toggles batch mode
   useEffect(() => {
@@ -142,11 +196,25 @@ export function App() {
     }
   };
 
+  // Show setup wizard before the main UI if first-launch setup is needed
+  if (setupNeeded === true) {
+    return <SetupWizard onComplete={() => setSetupNeeded(false)} />;
+  }
+  if (setupNeeded === null) {
+    return <div className="app" style={{ display: "flex", alignItems: "center", justifyContent: "center", color: "var(--ink-mute)" }}>Loading…</div>;
+  }
+
   return (
     <div className="app">
       <div className="titlebar">
         <span className="brand">PRISM</span>
         <span className="brand-version">v{version}</span>
+        <span style={{ flex: 1 }} />
+        {messages.length > 0 && (
+          <button className="titlebar-clear" onClick={clearChat} title="Clear local chat history">
+            Clear
+          </button>
+        )}
       </div>
 
       {(updateState.kind === "available" || updateState.kind === "downloaded") && (
