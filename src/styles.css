@@ -612,6 +612,60 @@ html[data-theme="dark"] {
   background: var(--ink);
   color: var(--bg);
   border-bottom-right-radius: 4px;
+  position: relative;
+}
+
+.msg.user .msg-edit {
+  position: absolute;
+  top: 4px;
+  right: -32px;
+  width: 24px;
+  height: 24px;
+  font-size: 12px;
+  color: var(--ink-mute);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg-card);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 100ms ease;
+}
+
+.msg.user:hover .msg-edit {
+  opacity: 1;
+}
+
+.msg.user .msg-edit:hover {
+  color: var(--ink);
+  border-color: var(--border-strong);
+}
+
+.msg.user.editing {
+  background: var(--bg-card);
+  color: var(--ink);
+  border: 1px solid var(--border-strong);
+  width: 78%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.msg.user.editing textarea {
+  background: transparent;
+  width: 100%;
+  font-family: var(--mono);
+  font-size: 13.5px;
+  line-height: 1.5;
+  min-height: 60px;
+  color: var(--ink);
+}
+
+.msg-edit-hint {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--ink-mute);
 }
 
 .msg.assistant {

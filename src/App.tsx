@@ -429,7 +429,32 @@ export function App() {
           {messages.map((m, i) => {
             const isLast = i === messages.length - 1;
             const isStreaming = streaming && isLast && m.role === "assistant";
-            return <Message key={i} message={m} streaming={isStreaming} />;
+            const onEdit =
+              m.role === "user"
+                ? async (newText: string) => {
+                    if (!client || streaming) return;
+                    // Truncate everything from this user message onward,
+                    // replace it with the new text, then re-send.
+                    updateActiveMessages((prev) => {
+                      const next = prev.slice(0, i);
+                      return [...next, { ...m, text: newText }];
+                    });
+                    try {
+                      await client.send(
+                        m.batch ? `/batch\n${newText}` : newText,
+                        settings.model,
+                      );
+                    } catch (e: any) {
+                      updateActiveMessages((prev) => [
+                        ...prev,
+                        { role: "system", text: `Send failed: ${e.message ?? String(e)}` },
+                      ]);
+                    }
+                  }
+                : undefined;
+            return (
+              <Message key={i} message={m} streaming={isStreaming} onEdit={onEdit} />
+            );
           })}
         </div>
 

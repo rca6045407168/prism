@@ -63,10 +63,13 @@ function CodeBlock({ children, language }: { children: string; language: string 
 type Props = {
   message: ChatMessage;
   streaming?: boolean;
+  onEdit?: (newText: string) => void;
 };
 
-export function Message({ message, streaming = false }: Props) {
+export function Message({ message, streaming = false, onEdit }: Props) {
   const [copiedAll, setCopiedAll] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
 
   const copyAll = async () => {
     try {
@@ -78,7 +81,39 @@ export function Message({ message, streaming = false }: Props) {
     }
   };
 
+  const startEdit = () => {
+    setDraft(message.text);
+    setEditing(true);
+  };
+
+  const commitEdit = () => {
+    setEditing(false);
+    if (draft.trim() && draft !== message.text && onEdit) {
+      onEdit(draft.trim());
+    }
+  };
+
   if (message.role === "user") {
+    if (editing) {
+      return (
+        <div className="msg user editing">
+          <textarea
+            autoFocus
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commitEdit}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                commitEdit();
+              }
+              if (e.key === "Escape") setEditing(false);
+            }}
+          />
+          <div className="msg-edit-hint">Enter saves + regenerates · Esc cancels</div>
+        </div>
+      );
+    }
     return (
       <div className="msg user">
         {message.batch && (
@@ -87,6 +122,15 @@ export function Message({ message, streaming = false }: Props) {
           </div>
         )}
         {message.text}
+        {onEdit && (
+          <button
+            className="msg-edit"
+            onClick={startEdit}
+            title="Edit and regenerate"
+          >
+            ✎
+          </button>
+        )}
       </div>
     );
   }
