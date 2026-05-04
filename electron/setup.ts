@@ -137,17 +137,33 @@ async function waitForPairFile(timeoutMs: number): Promise<boolean> {
  * Public entry — register IPC handlers and run setup if needed.
  * Called once from main.ts at app-ready.
  */
+// In-memory cache for setup status. Avoids re-running brew/path/socket checks
+// on every renderer query — these answers don't change moment-to-moment.
+// Invalidated on demand via prism:setup:status:invalidate. (v0.1.4)
+let cachedStatus: { ts: number; value: unknown } | null = null;
+const STATUS_CACHE_MS = 5000;
+
 export function registerSetup(getWindow: () => BrowserWindow | null) {
   ipcMain.handle("prism:setup:status", async () => {
+    if (cachedStatus && Date.now() - cachedStatus.ts < STATUS_CACHE_MS) {
+      return cachedStatus.value;
+    }
     // CRITICAL: await the Promise — IPC structured-clone drops bare Promises
     // silently, which previously made the renderer wait forever or show the
     // wizard incorrectly. Bug fixed in v0.1.3.
     const reachable = await portReachable(GATEWAY_PORT, GATEWAY_HOST, 500);
-    return {
+    const value = {
       runtimeInstalled: runtimeInstalled(),
       paired: pairFileExists(),
       daemonReachable: reachable,
     };
+    cachedStatus = { ts: Date.now(), value };
+    return value;
+  });
+
+  ipcMain.handle("prism:setup:status:invalidate", () => {
+    cachedStatus = null;
+    return { ok: true };
   });
 
   ipcMain.handle("prism:setup:run", async () => {

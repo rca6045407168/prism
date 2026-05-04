@@ -2,6 +2,8 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { GatewayClient, ChatMessage } from "./gateway";
 import { SetupWizard } from "./SetupWizard";
 import { SettingsModal, loadSettings, saveSettings, MODEL_OPTIONS, Settings } from "./Settings";
+import { Message } from "./Message";
+import { Message } from "./Message";
 
 type UpdateState =
   | { kind: "idle" }
@@ -287,14 +289,7 @@ export function App() {
           </div>
         )}
         {messages.map((m, i) => (
-          <div key={i} className={`msg ${m.role}`}>
-            {m.batch && (
-              <div className="label batch">
-                ▲ Batch · {m.batchCount} prompts in parallel
-              </div>
-            )}
-            {m.text}
-          </div>
+          <Message key={i} message={m} />
         ))}
       </div>
 
