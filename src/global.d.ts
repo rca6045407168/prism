@@ -7,6 +7,34 @@
 
 type SetupStepStatus = "pending" | "running" | "ok" | "error" | "needs-action";
 
+type ProfileDimension =
+  | "communication_style"
+  | "role_context"
+  | "tooling"
+  | "naming"
+  | "decision_style"
+  | "project_focus"
+  | "anti_patterns"
+  | "knowledge";
+
+type ProfileEntry = {
+  id: string;
+  dimension: ProfileDimension;
+  claim: string;
+  confidence: number;
+  evidence?: string;
+  source_turn?: string;
+  added_at: string;
+};
+
+type ProfileData = {
+  version: 1;
+  learning_paused: boolean;
+  entries: ProfileEntry[];
+  turns_seen: number;
+  updated_at: string;
+};
+
 declare global {
   interface Window {
     flexhaul: {
@@ -74,6 +102,13 @@ declare global {
         onError: (
           cb: (ev: { turnId: string; error: string; sessionExpired?: boolean }) => void,
         ) => () => void;
+      };
+      profile: {
+        get: () => Promise<ProfileData>;
+        setPaused: (paused: boolean) => Promise<ProfileData>;
+        removeEntry: (id: string) => Promise<ProfileData>;
+        clearAll: () => Promise<ProfileData>;
+        onPending: (cb: (ev: { turnId: string }) => void) => () => void;
       };
     };
   }

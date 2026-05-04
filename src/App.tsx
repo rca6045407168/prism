@@ -41,6 +41,7 @@ export function App() {
   const [setupNeeded, setSetupNeeded] = useState<boolean | null>(null);
   const [settings, setSettings] = useState<Settings>(() => loadSettings());
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [memoryPending, setMemoryPending] = useState(false);
 
   // Multi-chat state (v0.1.5)
   const [chats, setChats] = useState<Chat[]>(() => {
@@ -242,11 +243,16 @@ export function App() {
       }
     });
 
+    const offPending = window.flexhaul.profile.onPending(() => {
+      setMemoryPending(true);
+    });
+
     return () => {
       offStart();
       offDelta();
       offEnd();
       offError();
+      offPending();
     };
   }, [activeId, updateActiveMessages]);
 
@@ -440,10 +446,18 @@ export function App() {
           <span style={{ flex: 1 }} />
           <button
             className="titlebar-button"
-            onClick={() => setSettingsOpen(true)}
-            title="Settings (⌘,)"
+            onClick={() => {
+              setSettingsOpen(true);
+              setMemoryPending(false);
+            }}
+            title={
+              memoryPending
+                ? "Settings — new memory learned"
+                : "Settings (⌘,)"
+            }
           >
             ⚙
+            {memoryPending ? <span className="titlebar-button-dot" /> : null}
           </button>
         </div>
 

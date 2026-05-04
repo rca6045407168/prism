@@ -20,6 +20,12 @@ import * as fs from "fs";
 import * as os from "os";
 import { registerSetup } from "./setup";
 import { registerClaudeClient } from "./claude-client";
+import {
+  loadProfile,
+  setLearningPaused,
+  removeEntry,
+  clearAll,
+} from "./profile-store";
 
 // ---------- logging ----------
 log.transports.file.level = "info";
@@ -103,6 +109,21 @@ function createWindow(): void {
 
 ipcMain.handle("flexhaul:getGatewayConfig", () => gatewayConfig());
 ipcMain.handle("flexhaul:getAppVersion", () => app.getVersion());
+
+// ---------- profile (auto-memory, v0.1.17) ----------
+ipcMain.handle("prism:profile:get", () => loadProfile());
+ipcMain.handle("prism:profile:setPaused", (_e, paused: boolean) => {
+  setLearningPaused(!!paused);
+  return loadProfile();
+});
+ipcMain.handle("prism:profile:removeEntry", (_e, id: string) => {
+  removeEntry(String(id));
+  return loadProfile();
+});
+ipcMain.handle("prism:profile:clearAll", () => {
+  clearAll();
+  return loadProfile();
+});
 ipcMain.handle("flexhaul:checkForUpdates", async () => {
   try {
     const result = await autoUpdater.checkForUpdates();

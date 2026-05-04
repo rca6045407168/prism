@@ -368,6 +368,24 @@ textarea, input {
   color: var(--ink-soft);
 }
 
+/* Subtle pulse on the gear when a new memory was just learned. */
+.titlebar-button-dot {
+  position: relative;
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #4ac29a;
+  margin-left: 4px;
+  box-shadow: 0 0 4px rgba(74, 194, 154, 0.5);
+  animation: prism-dot-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes prism-dot-pulse {
+  0%, 100% { opacity: 0.55; transform: scale(1); }
+  50%      { opacity: 1;    transform: scale(1.18); }
+}
+
 /* Manual theme override (data-theme on <html>) */
 html[data-theme="light"] {
   --bg: #fafaf6;
@@ -545,6 +563,168 @@ html[data-theme="dark"] {
 .settings-secondary:hover {
   border-color: var(--border-strong);
   color: var(--ink);
+}
+
+/* ── Settings: tabs + memory ─────────────────────────────────── */
+
+.settings-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-tab {
+  padding: 10px 14px;
+  font-size: 13px;
+  color: var(--ink-mute);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.settings-tab:hover {
+  color: var(--ink-soft);
+}
+
+.settings-tab.active {
+  color: var(--ink);
+  border-bottom-color: var(--ink);
+}
+
+.settings-tab-count {
+  background: var(--bg-input);
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-family: var(--mono);
+  padding: 1px 6px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+
+.settings-memory-intro p {
+  font-size: 13px;
+  color: var(--ink-soft);
+  line-height: 1.5;
+  margin-bottom: 6px;
+}
+
+.settings-memory-stats {
+  font-size: 13px;
+  color: var(--ink-soft);
+  padding: 4px 0 12px;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.settings-memory-divider {
+  color: var(--ink-mute);
+}
+
+.settings-memory-empty {
+  font-size: 13px;
+  color: var(--ink-mute);
+  padding: 16px 0;
+  font-style: italic;
+}
+
+.settings-memory-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-top: 8px;
+}
+
+.settings-memory-group-title {
+  font-size: 11px;
+  font-family: var(--mono);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-mute);
+  margin-bottom: 6px;
+}
+
+.settings-memory-item {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin-bottom: 6px;
+  position: relative;
+}
+
+.settings-memory-claim {
+  font-size: 13px;
+  color: var(--ink);
+  line-height: 1.45;
+  padding-right: 60px;
+}
+
+.settings-memory-evidence {
+  font-size: 12px;
+  color: var(--ink-mute);
+  font-style: italic;
+  margin-top: 4px;
+  padding-right: 60px;
+}
+
+.settings-memory-forget {
+  position: absolute;
+  top: 9px;
+  right: 10px;
+  font-size: 11px;
+  color: var(--ink-mute);
+  padding: 3px 8px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  background: transparent;
+}
+
+.settings-memory-item:hover .settings-memory-forget {
+  border-color: var(--border);
+  color: var(--ink-soft);
+}
+
+.settings-memory-forget:hover {
+  color: #c0392b;
+  border-color: rgba(192, 57, 43, 0.4);
+}
+
+.settings-memory-clear {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
+.settings-memory-danger-link {
+  font-size: 12px;
+  color: var(--ink-mute);
+  text-decoration: underline;
+  text-decoration-color: var(--ink-mute);
+  text-underline-offset: 3px;
+  padding: 0;
+}
+
+.settings-memory-danger-link:hover {
+  color: #c0392b;
+  text-decoration-color: #c0392b;
+}
+
+.settings-memory-danger {
+  background: #c0392b;
+  color: #fff;
+  padding: 6px 12px;
+  border-radius: 5px;
+  font-size: 12px;
+  font-weight: 500;
 }
 
 /* ── Banners ──────────────────────────────────────────────────── */

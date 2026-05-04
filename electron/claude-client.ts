@@ -18,6 +18,8 @@
 import { spawn, type ChildProcess } from "child_process";
 import { ipcMain, BrowserWindow } from "electron";
 import * as fs from "fs";
+import { renderForInjection } from "./profile-store";
+import { enqueueExtraction } from "./profile-extractor";
 
 const CLAUDE_BIN_CANDIDATES = [
   "/Users/richardchen/.openclaw/bin/claude",      // arm64 wrapper (preferred)
@@ -46,6 +48,9 @@ type Turn = {
    *  surfacing a "claude exited with code null" system message that's
    *  noise from our own SIGTERM. (v0.1.11) */
   aborted: boolean;
+  /** Echoed back to the extractor on success so it can mine stable
+   *  preferences from the (user, assistant) exchange. v0.1.17. */
+  userMessage: string;
 };
 
 const activeTurns = new Map<string, Turn>();
@@ -170,6 +175,21 @@ function processLine(turn: Turn, line: string): void {
         durationMs: parsed.duration_ms,
         cost: parsed.total_cost_usd,
       });
+
+      // v0.1.17: kick off background profile extraction. Fire-and-forget
+      // — never blocks the chat path, never surfaces errors.
+      try {
+        enqueueExtraction({
+          turnId: turn.turnId,
+          userMessage: turn.userMessage,
+          assistantText: turn.finalText,
+        });
+      } catch {
+        /* ignore */
+      }
+      // Notify renderer that a profile update may be pending — the gear
+      // icon shows a tiny dot until the user opens Memory.
+      emit(turn.window, "prism:profile:pending", { turnId: turn.turnId });
     }
     return;
   }
@@ -208,6 +228,14 @@ function send(params: {
   }
   if (params.sessionId) {
     args.push("--resume", params.sessionId);
+  }
+
+  // v0.1.17: inject the auto-profile as a system-prompt prefix when
+  // the user has any learned preferences. Empty string means no profile
+  // yet → no flag → no overhead.
+  const profileBlock = renderForInjection();
+  if (profileBlock) {
+    args.push("--append-system-prompt", profileBlock);
   }
 
   // Write the message via stdin? No — claude --print takes the prompt as
@@ -267,6 +295,7 @@ function send(params: {
     sessionId: params.sessionId ?? null,
     errored: false,
     aborted: false,
+    userMessage: params.message,
   };
   activeTurns.set(turnId, turn);
 

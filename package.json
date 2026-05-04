@@ -1,6 +1,6 @@
 {
   "name": "prism",
-  "version": "0.1.16",
+  "version": "0.1.17",
   "description": "Prism — type N prompts, get N parallel agents, reconciled into one answer.",
   "author": {
     "name": "Richard Chen",
@@ -38,8 +38,7 @@
         {
           "target": "dmg",
           "arch": [
-            "arm64",
-            "x64"
+            "arm64"
           ]
         },
         {

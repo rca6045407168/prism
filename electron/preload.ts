@@ -54,6 +54,22 @@ contextBridge.exposeInMainWorld("flexhaul", {
       return () => ipcRenderer.removeListener("prism:chat:error", listener);
     },
   },
+
+  // Auto-profile (v0.1.17) — local-only, silent learning of user
+  // preferences for a more personalized chat over time.
+  profile: {
+    get: () => ipcRenderer.invoke("prism:profile:get"),
+    setPaused: (paused: boolean) =>
+      ipcRenderer.invoke("prism:profile:setPaused", paused),
+    removeEntry: (id: string) =>
+      ipcRenderer.invoke("prism:profile:removeEntry", id),
+    clearAll: () => ipcRenderer.invoke("prism:profile:clearAll"),
+    onPending: (cb: (ev: { turnId: string }) => void) => {
+      const listener = (_: unknown, ev: any) => cb(ev);
+      ipcRenderer.on("prism:profile:pending", listener);
+      return () => ipcRenderer.removeListener("prism:profile:pending", listener);
+    },
+  },
 });
 
 // Type declaration for the renderer to import
