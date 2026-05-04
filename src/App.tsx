@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { GatewayClient, ChatMessage } from "./gateway";
 import { SetupWizard } from "./SetupWizard";
+import { SettingsModal, loadSettings, saveSettings, MODEL_OPTIONS, Settings } from "./Settings";
 
 type UpdateState =
   | { kind: "idle" }
@@ -32,26 +33,51 @@ export function App() {
   const [batchMode, setBatchMode] = useState(false);
   const [sending, setSending] = useState(false);
   const [setupNeeded, setSetupNeeded] = useState<boolean | null>(null);
+  const [settings, setSettings] = useState<Settings>(() => loadSettings());
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const chatRef = useRef<HTMLDivElement>(null);
 
-  // Pre-boot: check if first-launch setup is needed
+  // Apply theme override
+  useEffect(() => {
+    const root = document.documentElement;
+    if (settings.theme === "system") {
+      root.removeAttribute("data-theme");
+    } else {
+      root.setAttribute("data-theme", settings.theme);
+    }
+  }, [settings.theme]);
+
+  // Pre-boot: check if first-launch setup is needed.
+  // Hard timeout so the Loading screen never spins forever — if status check
+  // hangs > 4s, assume setup is needed and show the wizard.
   useEffect(() => {
     let cancelled = false;
+    const fallbackTimer = setTimeout(() => {
+      if (!cancelled) {
+        console.warn("setup status check timed out — showing wizard");
+        setSetupNeeded(true);
+      }
+    }, 4000);
+
     (async () => {
       try {
         const v = await window.flexhaul.getAppVersion();
         if (!cancelled) setVersion(v);
         const status = await window.flexhaul.setup.status();
-        const reachable = await Promise.resolve(status.daemonReachable);
         if (cancelled) return;
+        const reachable = !!status.daemonReachable;
+        clearTimeout(fallbackTimer);
         // Setup needed if either: runtime missing, not paired, or daemon down
         setSetupNeeded(!status.runtimeInstalled || !status.paired || !reachable);
-      } catch {
+      } catch (e) {
+        clearTimeout(fallbackTimer);
         if (!cancelled) setSetupNeeded(true);
       }
     })();
+
     return () => {
       cancelled = true;
+      clearTimeout(fallbackTimer);
     };
   }, []);
 
@@ -132,12 +158,16 @@ export function App() {
     }
   }, [messages.length]);
 
-  // Cmd+B toggles batch mode
+  // Keyboard shortcuts
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "b") {
         e.preventDefault();
         setBatchMode((v) => !v);
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === ",") {
+        e.preventDefault();
+        setSettingsOpen(true);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -164,7 +194,7 @@ export function App() {
         { role: "user", text, batch: true, batchCount: prompts.length },
       ]);
       try {
-        await client.send(`/batch\n${prompts.join("\n")}`);
+        await client.send(`/batch\n${prompts.join("\n")}`, settings.model);
       } catch (e: any) {
         setMessages((prev) => [
           ...prev,
@@ -174,7 +204,7 @@ export function App() {
     } else {
       setMessages((prev) => [...prev, { role: "user", text }]);
       try {
-        await client.send(text);
+        await client.send(text, settings.model);
       } catch (e: any) {
         setMessages((prev) => [
           ...prev,
@@ -211,11 +241,21 @@ export function App() {
         <span className="brand-version">v{version}</span>
         <span style={{ flex: 1 }} />
         {messages.length > 0 && (
-          <button className="titlebar-clear" onClick={clearChat} title="Clear local chat history">
+          <button className="titlebar-button" onClick={clearChat} title="Clear local chat history">
             Clear
           </button>
         )}
+        <button className="titlebar-button" onClick={() => setSettingsOpen(true)} title="Settings (⌘,)">
+          ⚙
+        </button>
       </div>
+
+      <SettingsModal
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        onChange={setSettings}
+        current={settings}
+      />
 
       {(updateState.kind === "available" || updateState.kind === "downloaded") && (
         <div className="update-banner">
@@ -262,10 +302,26 @@ export function App() {
         <div className="composer-hint">
           <span>
             {batchMode
-              ? "Batch mode · one prompt per line · ⌘+Enter to send"
+              ? "Batch · one prompt per line · ⌘+Enter to send"
               : "Enter to send · Shift+Enter for new line · ⌘B to batch"}
           </span>
-          <span>
+          <span style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <select
+              className="model-picker"
+              value={settings.model}
+              onChange={(e) => {
+                const next = { ...settings, model: e.target.value };
+                setSettings(next);
+                saveSettings(next);
+              }}
+              title="Model — change in Settings for full options"
+            >
+              {MODEL_OPTIONS.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.id === "auto" ? "Auto" : m.id}
+                </option>
+              ))}
+            </select>
             <a
               href={PRICING_URL}
               onClick={(e) => {
@@ -274,7 +330,7 @@ export function App() {
               }}
               style={{ color: "inherit", textDecoration: "underline dotted" }}
             >
-              Free in beta · Pricing
+              Beta
             </a>
           </span>
         </div>

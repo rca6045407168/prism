@@ -40,15 +40,29 @@ export class GatewayClient {
 
   async connect(): Promise<void> {
     return new Promise((resolve, reject) => {
-      // OpenClaw gateway accepts the token via Sec-WebSocket-Protocol or query string.
-      // Browser WebSocket can't set custom headers; use query string.
       const u = new URL(this.url);
       u.searchParams.set("token", this.token);
       this.ws = new WebSocket(u.toString());
 
-      this.ws.onopen = () => resolve();
-      this.ws.onerror = (e) => reject(new Error(`WebSocket error: ${String(e)}`));
+      // Hard timeout: if the daemon doesn't ack in 6s, give up so the UI
+      // can show an error rather than spin forever. (v0.1.3)
+      const timer = setTimeout(() => {
+        try {
+          this.ws?.close();
+        } catch {}
+        reject(new Error("Gateway connect timed out (6s)"));
+      }, 6000);
+
+      this.ws.onopen = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+      this.ws.onerror = (e) => {
+        clearTimeout(timer);
+        reject(new Error(`WebSocket error: ${String(e)}`));
+      };
       this.ws.onclose = (e) => {
+        clearTimeout(timer);
         // Surface unexpected closes to the UI as a system message
         if (e.code !== 1000 && e.code !== 1001) {
           this.onMessage({
@@ -115,12 +129,16 @@ export class GatewayClient {
   /**
    * Send a chat message and wait for the assistant's reply.
    * The reply arrives async via onMessage; this just confirms the dispatch.
+   *
+   * `model` is the user's chosen model alias from Settings. "auto" lets
+   * the auto-model-select skill route per prompt; any other value pins.
    */
-  async send(text: string): Promise<void> {
+  async send(text: string, model: string = "auto"): Promise<void> {
     await this.rpc("chat.send", {
       sessionKey: "main",
       message: text,
       channel: "webchat",
+      model: model === "auto" ? undefined : model,
     });
   }
 

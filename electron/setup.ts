@@ -138,11 +138,17 @@ async function waitForPairFile(timeoutMs: number): Promise<boolean> {
  * Called once from main.ts at app-ready.
  */
 export function registerSetup(getWindow: () => BrowserWindow | null) {
-  ipcMain.handle("prism:setup:status", () => ({
-    runtimeInstalled: runtimeInstalled(),
-    paired: pairFileExists(),
-    daemonReachable: portReachable(GATEWAY_PORT, GATEWAY_HOST),
-  }));
+  ipcMain.handle("prism:setup:status", async () => {
+    // CRITICAL: await the Promise — IPC structured-clone drops bare Promises
+    // silently, which previously made the renderer wait forever or show the
+    // wizard incorrectly. Bug fixed in v0.1.3.
+    const reachable = await portReachable(GATEWAY_PORT, GATEWAY_HOST, 500);
+    return {
+      runtimeInstalled: runtimeInstalled(),
+      paired: pairFileExists(),
+      daemonReachable: reachable,
+    };
+  });
 
   ipcMain.handle("prism:setup:run", async () => {
     const window = getWindow();
