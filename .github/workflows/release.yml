@@ -1,0 +1,45 @@
+name: Build + release .dmg
+
+# Triggered by pushing a v* tag. Builds the macOS .dmg for both arm64 and x64,
+# attaches them to a GitHub Release, which electron-updater on installed
+# clients then auto-discovers.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write # needed to publish releases
+
+jobs:
+  build:
+    runs-on: macos-14 # arm64 runner; we cross-build x64 too
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - run: npm ci
+
+      - name: Build .dmg (arm64 + x64, unsigned)
+        env:
+          # No code signing in v0.1 — users will need to right-click → Open
+          # to bypass Gatekeeper. Phase 2: add APPLE_ID + signing cert secrets.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: npm run release
+
+      - name: Upload .dmg artifacts to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/*.dmg
+            release/latest-mac.yml
+            release/*.blockmap
+          fail_on_unmatched_files: false
+          generate_release_notes: true

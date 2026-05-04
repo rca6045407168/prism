@@ -1,0 +1,72 @@
+name: Daily upstream watch
+
+# Checks once a day for new OpenClaw releases. If upstream has a release we
+# haven't tracked, opens an issue here so we know to consider rebasing or
+# bumping the dependency. We don't auto-rebase — that would require human
+# review of new daemon behavior.
+
+on:
+  schedule:
+    - cron: "17 14 * * *" # 14:17 UTC daily (~7am PT)
+  workflow_dispatch: # manual trigger from Actions tab
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get latest OpenClaw release
+        id: latest
+        run: |
+          LATEST=$(curl -sf https://api.github.com/repos/openclaw/openclaw/releases/latest | jq -r .tag_name)
+          echo "tag=$LATEST" >> $GITHUB_OUTPUT
+          echo "Latest upstream tag: $LATEST"
+
+      - name: Check our recorded version
+        id: ours
+        uses: actions/checkout@v4
+
+      - name: Compare and open issue if drifted
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          UPSTREAM: ${{ steps.latest.outputs.tag }}
+        run: |
+          TRACKED_FILE=".upstream-version"
+          TRACKED=$(cat "$TRACKED_FILE" 2>/dev/null || echo "none")
+          if [ "$TRACKED" = "$UPSTREAM" ]; then
+            echo "Already up to date with $UPSTREAM"
+            exit 0
+          fi
+
+          # Check if an issue for this version already exists
+          EXISTING=$(gh issue list --repo "${{ github.repository }}" \
+            --search "Upstream OpenClaw $UPSTREAM in:title" \
+            --state open --json number --jq length)
+          if [ "$EXISTING" != "0" ]; then
+            echo "Issue already exists for $UPSTREAM"
+            exit 0
+          fi
+
+          gh issue create \
+            --repo "${{ github.repository }}" \
+            --title "Upstream OpenClaw $UPSTREAM available (we track $TRACKED)" \
+            --label "upstream-sync" \
+            --body "Upstream released **$UPSTREAM** today.
+
+          We're currently tracking **$TRACKED** (per \`.upstream-version\`).
+
+          ## Decision matrix
+
+          - **Patch bump (e.g. 2026.5.x → 2026.5.y):** safe to auto-bump after CI passes.
+          - **Minor bump (e.g. 2026.5.x → 2026.6.x):** test our connection layer (\`src/gateway.ts\`) for breaking WS protocol changes.
+          - **Major bump (e.g. 2026.x → 2027.x):** read the changelog before merging.
+
+          ## To bump
+
+          \`\`\`
+          echo $UPSTREAM > .upstream-version
+          git commit -am 'chore: track upstream OpenClaw $UPSTREAM'
+          git tag v\$(jq -r .version package.json) # if no app changes
+          git push --tags
+          \`\`\`
+
+          Auto-built .dmg will publish to GitHub Releases via release.yml."

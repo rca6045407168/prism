@@ -1,0 +1,84 @@
+{
+  "name": "flexhaul-agent",
+  "version": "0.1.0",
+  "description": "FlexHaul Agent — branded desktop client for the OpenClaw gateway",
+  "author": {
+    "name": "FlexHaul",
+    "email": "richard.chen@flexhaul.ai"
+  },
+  "homepage": "https://github.com/rca6045407168/flexhaul-agent",
+  "license": "MIT",
+  "main": "dist-electron/main.js",
+  "type": "commonjs",
+  "scripts": {
+    "dev": "vite",
+    "build:vite": "vite build",
+    "build:electron": "tsc -p tsconfig.electron.json",
+    "build": "npm run build:vite && npm run build:electron",
+    "start": "electron .",
+    "dist": "npm run build && electron-builder --mac dmg --publish never",
+    "release": "npm run build && electron-builder --mac dmg --publish always"
+  },
+  "build": {
+    "appId": "ai.flexhaul.agent",
+    "productName": "FlexHaul Agent",
+    "copyright": "Copyright © 2026 FlexHaul. Based on the OpenClaw open-source gateway (MIT).",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": ["arm64", "x64"]
+        }
+      ],
+      "icon": "build/icon.icns",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "identity": null,
+      "extendInfo": {
+        "NSAppleEventsUsageDescription": "FlexHaul Agent needs to communicate with the local OpenClaw gateway."
+      }
+    },
+    "dmg": {
+      "title": "FlexHaul Agent ${version}",
+      "background": null,
+      "contents": [
+        { "x": 130, "y": 220, "type": "file" },
+        { "x": 410, "y": 220, "type": "link", "path": "/Applications" }
+      ]
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "rca6045407168",
+        "repo": "flexhaul-agent",
+        "releaseType": "release"
+      }
+    ]
+  },
+  "dependencies": {
+    "electron-updater": "^6.3.9",
+    "electron-log": "^5.2.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^4.3.4",
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.5"
+  }
+}
