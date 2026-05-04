@@ -1,5 +1,7 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from "react";
-import { GatewayClient, ChatMessage } from "./gateway";
+// gateway.ts (WS-based) is deprecated as of v0.1.9 — kept only for the
+// ChatMessage type. Chat now goes through IPC → claude CLI in main process.
+import { ChatMessage } from "./gateway";
 import { SetupWizard } from "./SetupWizard";
 import { SettingsModal, loadSettings, saveSettings, MODEL_OPTIONS, Settings } from "./Settings";
 import { Message } from "./Message";
@@ -28,7 +30,11 @@ type UpdateState =
 const PRICING_URL = "https://prism.run/pricing";
 
 export function App() {
-  const [client, setClient] = useState<GatewayClient | null>(null);
+  // v0.1.9: chat backend is now child_process spawning the `claude` CLI.
+  // `claudeReady` reflects whether we found the binary; if false, show a
+  // setup error (the Setup wizard handles brew install if appropriate).
+  const [claudeReady, setClaudeReady] = useState<boolean | null>(null);
+  const [activeTurnId, setActiveTurnId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [version, setVersion] = useState<string>("");
   const [updateState, setUpdateState] = useState<UpdateState>({ kind: "idle" });
@@ -130,84 +136,101 @@ export function App() {
     [activeId],
   );
 
-  // Boot the gateway client when setup is complete
-  const bootGateway = useCallback(() => {
+  // Probe for claude CLI on boot. If missing, surface an error.
+  useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const cfg = await window.flexhaul.getGatewayConfig();
-        if (cfg.error) {
-          if (!cancelled) setError(cfg.error);
-          return;
+        const probe = await window.flexhaul.chat.probe();
+        if (!cancelled) setClaudeReady(probe.found);
+        if (!probe.found && !cancelled) {
+          setError(
+            "Claude CLI not found. Install Claude Code from claude.ai/code (or: brew install anthropic-ai/tap/claude-code), then relaunch Prism.",
+          );
         }
-        if (!cfg.token) {
-          if (!cancelled)
-            setError("Prism runtime paired but no operator token found. Re-run setup.");
-          return;
-        }
-        const c = new GatewayClient(cfg.url, cfg.token, (msg) => {
-          if (cancelled) return;
-          updateActiveMessages((prev) => [...prev, msg]);
-        });
-
-        // Streaming: append a placeholder assistant message at start, mutate
-        // its text in place on each delta, finalize on end.
-        c.onStream((ev) => {
-          if (cancelled) return;
-          if (ev.kind === "start") {
-            updateActiveMessages((prev) => [
-              ...prev,
-              { role: "assistant", text: "" },
-            ]);
-            setStreaming(true);
-          } else if (ev.kind === "delta") {
-            updateActiveMessages((prev) => {
-              if (prev.length === 0) return prev;
-              const next = [...prev];
-              const last = next[next.length - 1];
-              if (last.role === "assistant") {
-                next[next.length - 1] = { ...last, text: last.text + ev.text };
-              }
-              return next;
-            });
-          } else if (ev.kind === "end") {
-            setStreaming(false);
-            // If runtime sent a final non-empty text and we accumulated nothing,
-            // backfill so we don't show an empty bubble.
-            updateActiveMessages((prev) => {
-              if (prev.length === 0) return prev;
-              const last = prev[prev.length - 1];
-              if (last.role === "assistant" && last.text === "" && ev.finalText) {
-                const next = [...prev];
-                next[next.length - 1] = { ...last, text: ev.finalText };
-                return next;
-              }
-              return prev;
-            });
-          } else if (ev.kind === "error") {
-            setStreaming(false);
-            updateActiveMessages((prev) => [
-              ...prev,
-              { role: "system", text: `Error: ${ev.error}` },
-            ]);
-          }
-        });
-
-        await c.connect();
-        if (cancelled) return;
-        setClient(c);
       } catch (e: any) {
-        if (!cancelled) setError(`Failed to connect: ${e.message ?? String(e)}`);
+        if (!cancelled) {
+          setClaudeReady(false);
+          setError(`Failed to probe claude CLI: ${e.message ?? String(e)}`);
+        }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [updateActiveMessages]);
+  }, []);
 
+  // Subscribe to chat IPC events — append/mutate the current chat's messages
   useEffect(() => {
-    if (setupNeeded === false) return bootGateway();
-  }, [setupNeeded, bootGateway]);
+    const offStart = window.flexhaul.chat.onStart((ev) => {
+      // Stash session id back to the active chat so future turns can --resume
+      setChats((prev) =>
+        prev.map((c) =>
+          c.id === activeId && !c.claudeSessionId
+            ? { ...c, claudeSessionId: ev.sessionId }
+            : c,
+        ),
+      );
+      updateActiveMessages((prev) => [...prev, { role: "assistant", text: "" }]);
+      setActiveTurnId(ev.turnId);
+      setStreaming(true);
+    });
+
+    const offDelta = window.flexhaul.chat.onDelta((ev) => {
+      updateActiveMessages((prev) => {
+        if (prev.length === 0) return prev;
+        const next = [...prev];
+        const last = next[next.length - 1];
+        if (last.role === "assistant") {
+          next[next.length - 1] = { ...last, text: last.text + ev.text };
+        }
+        return next;
+      });
+    });
+
+    const offEnd = window.flexhaul.chat.onEnd((ev) => {
+      setStreaming(false);
+      setActiveTurnId(null);
+      // Persist the session id for --resume on next turn (in case onStart
+      // didn't capture it — defensive)
+      if (ev.sessionId) {
+        setChats((prev) =>
+          prev.map((c) =>
+            c.id === activeId ? { ...c, claudeSessionId: ev.sessionId } : c,
+          ),
+        );
+      }
+      // Backfill if assistant bubble is empty (defensive — shouldn't happen)
+      if (ev.finalText) {
+        updateActiveMessages((prev) => {
+          if (prev.length === 0) return prev;
+          const last = prev[prev.length - 1];
+          if (last.role === "assistant" && last.text === "") {
+            const next = [...prev];
+            next[next.length - 1] = { ...last, text: ev.finalText };
+            return next;
+          }
+          return prev;
+        });
+      }
+    });
+
+    const offError = window.flexhaul.chat.onError((ev) => {
+      setStreaming(false);
+      setActiveTurnId(null);
+      updateActiveMessages((prev) => [
+        ...prev,
+        { role: "system", text: `Error: ${ev.error}` },
+      ]);
+    });
+
+    return () => {
+      offStart();
+      offDelta();
+      offEnd();
+      offError();
+    };
+  }, [activeId, updateActiveMessages]);
 
   // Update events
   useEffect(() => {
@@ -287,11 +310,13 @@ export function App() {
   }, [handleNewChat]);
 
   const send = useCallback(async () => {
-    if (!client || !input.trim() || sending) return;
+    if (!claudeReady || !input.trim() || sending || streaming) return;
     const text = input.trim();
     setInput("");
     setSending(true);
 
+    let toSend: string;
+    let userBubble: ChatMessage;
     if (batchMode) {
       const prompts = text
         .split("\n")
@@ -301,31 +326,45 @@ export function App() {
         setSending(false);
         return;
       }
+      toSend = `/batch\n${prompts.join("\n")}`;
+      userBubble = { role: "user", text, batch: true, batchCount: prompts.length };
+    } else {
+      toSend = text;
+      userBubble = { role: "user", text };
+    }
+    updateActiveMessages((prev) => [...prev, userBubble]);
+
+    // Send via IPC. Resume the chat's claude session if we have one.
+    const sessionId = activeChat?.claudeSessionId ?? null;
+    const result = await window.flexhaul.chat.send({
+      message: toSend,
+      model: settings.model,
+      sessionId,
+    });
+    if ("error" in result) {
       updateActiveMessages((prev) => [
         ...prev,
-        { role: "user", text, batch: true, batchCount: prompts.length },
+        { role: "system", text: `Send failed: ${result.error}` },
       ]);
-      try {
-        await client.send(`/batch\n${prompts.join("\n")}`, settings.model);
-      } catch (e: any) {
-        updateActiveMessages((prev) => [
-          ...prev,
-          { role: "system", text: `Send failed: ${e.message ?? String(e)}` },
-        ]);
-      }
-    } else {
-      updateActiveMessages((prev) => [...prev, { role: "user", text }]);
-      try {
-        await client.send(text, settings.model);
-      } catch (e: any) {
-        updateActiveMessages((prev) => [
-          ...prev,
-          { role: "system", text: `Send failed: ${e.message ?? String(e)}` },
-        ]);
-      }
     }
+    // The actual reply arrives via onStart/onDelta/onEnd — no further work here
     setSending(false);
-  }, [client, input, batchMode, sending, settings.model, updateActiveMessages]);
+  }, [
+    claudeReady,
+    input,
+    batchMode,
+    sending,
+    streaming,
+    settings.model,
+    activeChat,
+    updateActiveMessages,
+  ]);
+
+  const abortTurn = useCallback(() => {
+    if (activeTurnId) {
+      window.flexhaul.chat.abort(activeTurnId);
+    }
+  }, [activeTurnId]);
 
   const onTextareaKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey && !batchMode) {
@@ -338,11 +377,12 @@ export function App() {
     }
   };
 
-  // Setup wizard / loading gate
-  if (setupNeeded === true) {
-    return <SetupWizard onComplete={() => setSetupNeeded(false)} />;
-  }
-  if (setupNeeded === null) {
+  // v0.1.9: chat now uses claude CLI directly. SetupWizard's old "install
+  // OpenClaw runtime" path is moot for chat; we still show it if the wizard
+  // would be helpful (e.g. user explicitly requested it). For now skip it
+  // entirely — chat readiness is gated on claudeReady, not the OpenClaw
+  // daemon being up.
+  if (claudeReady === null) {
     return (
       <div
         className="app"
@@ -353,7 +393,7 @@ export function App() {
           color: "var(--ink-mute)",
         }}
       >
-        Loading…
+        Looking for Claude CLI…
       </div>
     );
   }
@@ -432,22 +472,23 @@ export function App() {
             const onEdit =
               m.role === "user"
                 ? async (newText: string) => {
-                    if (!client || streaming) return;
+                    if (!claudeReady || streaming) return;
                     // Truncate everything from this user message onward,
                     // replace it with the new text, then re-send.
                     updateActiveMessages((prev) => {
                       const next = prev.slice(0, i);
                       return [...next, { ...m, text: newText }];
                     });
-                    try {
-                      await client.send(
-                        m.batch ? `/batch\n${newText}` : newText,
-                        settings.model,
-                      );
-                    } catch (e: any) {
+                    const sessionId = activeChat?.claudeSessionId ?? null;
+                    const result = await window.flexhaul.chat.send({
+                      message: m.batch ? `/batch\n${newText}` : newText,
+                      model: settings.model,
+                      sessionId,
+                    });
+                    if ("error" in result) {
                       updateActiveMessages((prev) => [
                         ...prev,
-                        { role: "system", text: `Send failed: ${e.message ?? String(e)}` },
+                        { role: "system", text: `Send failed: ${result.error}` },
                       ]);
                     }
                   }
@@ -502,9 +543,11 @@ export function App() {
               placeholder={
                 batchMode
                   ? "first prompt\nsecond prompt\nthird prompt"
-                  : client
+                  : claudeReady
                   ? "Ask anything…"
-                  : "Starting Prism runtime…"
+                  : claudeReady === null
+                  ? "Looking for Claude CLI…"
+                  : "Claude CLI not found — install from claude.ai/code"
               }
               rows={batchMode ? 5 : 1}
             />
@@ -518,14 +561,14 @@ export function App() {
               </button>
               {streaming ? (
                 <button
-                  onClick={() => client?.abort()}
+                  onClick={abortTurn}
                   className="composer-stop"
                   title="Stop generating"
                 >
                   ■ Stop
                 </button>
               ) : (
-                <button onClick={send} disabled={!client || !input.trim() || sending}>
+                <button onClick={send} disabled={!claudeReady || !input.trim() || sending}>
                   {sending ? "…" : "Send"}
                 </button>
               )}

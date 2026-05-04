@@ -46,6 +46,33 @@ declare global {
           }) => void,
         ) => () => void;
       };
+      chat: {
+        probe: () => Promise<{ found: boolean; path: string | null }>;
+        send: (params: {
+          message: string;
+          model?: string;
+          sessionId?: string | null;
+        }) => Promise<{ turnId: string } | { error: string }>;
+        abort: (turnId: string) => Promise<{ ok: boolean }>;
+        onStart: (
+          cb: (ev: {
+            turnId: string;
+            sessionId: string | null;
+            model?: string;
+          }) => void,
+        ) => () => void;
+        onDelta: (cb: (ev: { turnId: string; text: string }) => void) => () => void;
+        onEnd: (
+          cb: (ev: {
+            turnId: string;
+            finalText: string;
+            sessionId: string | null;
+            durationMs?: number;
+            cost?: number;
+          }) => void,
+        ) => () => void;
+        onError: (cb: (ev: { turnId: string; error: string }) => void) => () => void;
+      };
     };
   }
 }

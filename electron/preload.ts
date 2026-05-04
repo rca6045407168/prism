@@ -26,6 +26,34 @@ contextBridge.exposeInMainWorld("flexhaul", {
       return () => ipcRenderer.removeListener("prism:setup:step", listener);
     },
   },
+
+  // Chat — spawns `claude` CLI per turn (v0.1.9)
+  chat: {
+    probe: () => ipcRenderer.invoke("prism:chat:probe"),
+    send: (params: { message: string; model?: string; sessionId?: string | null }) =>
+      ipcRenderer.invoke("prism:chat:send", params),
+    abort: (turnId: string) => ipcRenderer.invoke("prism:chat:abort", { turnId }),
+    onStart: (cb: (ev: { turnId: string; sessionId: string | null; model?: string }) => void) => {
+      const listener = (_: unknown, ev: any) => cb(ev);
+      ipcRenderer.on("prism:chat:start", listener);
+      return () => ipcRenderer.removeListener("prism:chat:start", listener);
+    },
+    onDelta: (cb: (ev: { turnId: string; text: string }) => void) => {
+      const listener = (_: unknown, ev: any) => cb(ev);
+      ipcRenderer.on("prism:chat:delta", listener);
+      return () => ipcRenderer.removeListener("prism:chat:delta", listener);
+    },
+    onEnd: (cb: (ev: { turnId: string; finalText: string; sessionId: string | null; durationMs?: number; cost?: number }) => void) => {
+      const listener = (_: unknown, ev: any) => cb(ev);
+      ipcRenderer.on("prism:chat:end", listener);
+      return () => ipcRenderer.removeListener("prism:chat:end", listener);
+    },
+    onError: (cb: (ev: { turnId: string; error: string }) => void) => {
+      const listener = (_: unknown, ev: any) => cb(ev);
+      ipcRenderer.on("prism:chat:error", listener);
+      return () => ipcRenderer.removeListener("prism:chat:error", listener);
+    },
+  },
 });
 
 // Type declaration for the renderer to import

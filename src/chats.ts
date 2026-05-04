@@ -26,6 +26,10 @@ export type Chat = {
   messages: ChatMessage[];
   createdAt: number;
   updatedAt: number;
+  /** claude CLI session UUID for `--resume`. Captured from the first turn's
+   *  init event. Lets us actually have separate conversations across chats
+   *  on the backend (not just on the UI). v0.1.9. */
+  claudeSessionId?: string | null;
 };
 
 const CHATS_KEY = "prism.chats.v1";

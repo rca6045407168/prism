@@ -1,6 +1,6 @@
 {
   "name": "prism",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "description": "Prism — type N prompts, get N parallel agents, reconciled into one answer.",
   "author": {
     "name": "Richard Chen",
