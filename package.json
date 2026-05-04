@@ -1,12 +1,12 @@
 {
-  "name": "flexhaul-agent",
+  "name": "prism",
   "version": "0.1.0",
-  "description": "FlexHaul Agent — branded desktop client for the OpenClaw gateway",
+  "description": "Prism — type N prompts, get N parallel agents, reconciled into one answer.",
   "author": {
-    "name": "FlexHaul",
+    "name": "Richard Chen",
     "email": "richard.chen@flexhaul.ai"
   },
-  "homepage": "https://github.com/rca6045407168/flexhaul-agent",
+  "homepage": "https://github.com/rca6045407168/prism",
   "license": "MIT",
   "main": "dist-electron/main.js",
   "type": "commonjs",
@@ -20,9 +20,9 @@
     "release": "npm run build && electron-builder --mac dmg --publish always"
   },
   "build": {
-    "appId": "ai.flexhaul.agent",
-    "productName": "FlexHaul Agent",
-    "copyright": "Copyright © 2026 FlexHaul. Based on the OpenClaw open-source gateway (MIT).",
+    "appId": "ai.prism.agent",
+    "productName": "Prism",
+    "copyright": "Copyright © 2026 Richard Chen. Built on the OpenClaw open-source gateway (MIT).",
     "directories": {
       "output": "release",
       "buildResources": "build"
@@ -45,11 +45,11 @@
       "gatekeeperAssess": false,
       "identity": null,
       "extendInfo": {
-        "NSAppleEventsUsageDescription": "FlexHaul Agent needs to communicate with the local OpenClaw gateway."
+        "NSAppleEventsUsageDescription": "Prism needs to communicate with the local OpenClaw gateway."
       }
     },
     "dmg": {
-      "title": "FlexHaul Agent ${version}",
+      "title": "Prism ${version}",
       "background": null,
       "contents": [
         { "x": 130, "y": 220, "type": "file" },
@@ -60,7 +60,7 @@
       {
         "provider": "github",
         "owner": "rca6045407168",
-        "repo": "flexhaul-agent",
+        "repo": "prism",
         "releaseType": "release"
       }
     ]

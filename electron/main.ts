@@ -1,5 +1,5 @@
 /**
- * FlexHaul Agent — Electron main process.
+ * Prism — Electron main process.
  *
  * Responsibilities:
  *  - Open the chat window (loads the Vite-built React UI).
@@ -64,7 +64,7 @@ function createWindow(): void {
     height: 760,
     minWidth: 600,
     minHeight: 400,
-    title: "FlexHaul Agent",
+    title: "Prism",
     backgroundColor: "#0a0a0a",
     webPreferences: {
       contextIsolation: true,
@@ -195,8 +195,8 @@ function buildMenu() {
           click: () => shell.openExternal("https://github.com/openclaw/openclaw"),
         },
         {
-          label: "FlexHaul Agent on GitHub",
-          click: () => shell.openExternal("https://github.com/rca6045407168/flexhaul-agent"),
+          label: "Prism on GitHub",
+          click: () => shell.openExternal("https://github.com/rca6045407168/prism"),
         },
       ],
     },

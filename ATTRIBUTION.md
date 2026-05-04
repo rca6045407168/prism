@@ -1,10 +1,10 @@
 # Attribution
 
-FlexHaul Agent is built on top of [OpenClaw](https://github.com/openclaw/openclaw),
+Prism is built on top of [OpenClaw](https://github.com/openclaw/openclaw),
 which is licensed under MIT.
 
 The OpenClaw daemon, gateway protocol, skills system, and MCP framework are
-all OpenClaw work. FlexHaul Agent is an independent desktop client that
+all OpenClaw work. Prism is an independent desktop client that
 consumes the OpenClaw gateway WebSocket API.
 
 The community-built [openclaw-desktop](https://github.com/rshodoskar-star/openclaw-desktop)

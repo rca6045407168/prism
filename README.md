@@ -1,4 +1,4 @@
-# FlexHaul Agent
+# Prism
 
 Branded desktop client for the [OpenClaw](https://github.com/openclaw/openclaw)
 gateway. Talks to a locally-running OpenClaw daemon over WebSocket.
@@ -7,16 +7,16 @@ Adds on top of the upstream dashboard:
 
 - **Batch mode** — fan out N prompts to N parallel agents in one submit
 - **Auto model selection** — cheap/standard/reasoning routing per prompt
-- **FlexHaul branding + auto-update** — versioned releases via GitHub, no
+- **Prism branding + auto-update** — versioned releases via GitHub, no
   manual upgrades required
 
 ## Install
 
 Download the latest `.dmg` from
-[Releases](https://github.com/rca6045407168/flexhaul-agent/releases/latest)
+[Releases](https://github.com/rca6045407168/prism/releases/latest)
 and drag to Applications.
 
-First launch will say "FlexHaul Agent can't be opened because it's from
+First launch will say "Prism can't be opened because it's from
 an unidentified developer" — Right-click → Open → Open. (Code signing
 ships in v0.2.)
 

@@ -8,6 +8,8 @@ type UpdateState =
   | { kind: "downloaded"; version: string }
   | { kind: "error"; message: string };
 
+const PRICING_URL = "https://prism.run/pricing"; // TODO: replace with real Stripe Payment Link once account exists
+
 export function App() {
   const [client, setClient] = useState<GatewayClient | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -19,7 +21,7 @@ export function App() {
   const [sending, setSending] = useState(false);
   const chatRef = useRef<HTMLDivElement>(null);
 
-  // Boot: discover gateway, connect, wire update events
+  // Boot
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -71,10 +73,22 @@ export function App() {
     };
   }, []);
 
-  // Auto-scroll on new message
+  // Auto-scroll
   useEffect(() => {
     if (chatRef.current) chatRef.current.scrollTop = chatRef.current.scrollHeight;
   }, [messages]);
+
+  // Cmd+B toggles batch mode
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "b") {
+        e.preventDefault();
+        setBatchMode((v) => !v);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   const send = useCallback(async () => {
     if (!client || !input.trim() || sending) return;
@@ -93,7 +107,7 @@ export function App() {
       }
       setMessages((prev) => [
         ...prev,
-        { role: "user", text: text, batch: true, batchCount: prompts.length },
+        { role: "user", text, batch: true, batchCount: prompts.length },
       ]);
       try {
         await client.send(`/batch\n${prompts.join("\n")}`);
@@ -117,7 +131,7 @@ export function App() {
     setSending(false);
   }, [client, input, batchMode, sending]);
 
-  const onKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+  const onTextareaKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey && !batchMode) {
       e.preventDefault();
       send();
@@ -131,7 +145,8 @@ export function App() {
   return (
     <div className="app">
       <div className="titlebar">
-        FlexHaul Agent <span className="version">v{version}</span>
+        <span className="brand">PRISM</span>
+        <span className="brand-version">v{version}</span>
       </div>
 
       {(updateState.kind === "available" || updateState.kind === "downloaded") && (
@@ -152,19 +167,22 @@ export function App() {
       <div className="chat" ref={chatRef}>
         {messages.length === 0 && !error && (
           <div className="empty-state">
-            <h2>FlexHaul Agent</h2>
-            <p>
-              Connected to local OpenClaw daemon. Send a message to start. Press{" "}
-              <code>⌘B</code> or click <strong>Batch</strong> below to fan out N prompts in
-              parallel.
-            </p>
+            <div className="prism-mark" />
+            <h2>Prism</h2>
+            <div className="tagline">
+              Type N prompts. Get N parallel agents. Reconciled into one answer.
+              Routes across any model — Anthropic, OSS, local. Runs on your machine.
+            </div>
+            <div className="hint">
+              Press <kbd>Enter</kbd> to send · <kbd>⌘</kbd>+<kbd>B</kbd> for batch mode
+            </div>
           </div>
         )}
         {messages.map((m, i) => (
           <div key={i} className={`msg ${m.role}`}>
             {m.batch && (
               <div className="label batch">
-                ⚡ Batch · {m.batchCount} prompts in parallel
+                ▲ Batch · {m.batchCount} prompts in parallel
               </div>
             )}
             {m.text}
@@ -172,33 +190,47 @@ export function App() {
         ))}
       </div>
 
-      <div className={`composer ${batchMode ? "batch-mode-active" : ""}`}>
+      <div className={`composer ${batchMode ? "batch-active" : ""}`}>
         <div className="composer-hint">
-          {batchMode
-            ? "Batch mode: one prompt per line. ⌘+Enter to send. Each runs in parallel via the batch-orchestrator skill."
-            : "Enter to send · Shift+Enter for new line · ⌘B to toggle batch mode"}
+          <span>
+            {batchMode
+              ? "Batch mode · one prompt per line · ⌘+Enter to send"
+              : "Enter to send · Shift+Enter for new line · ⌘B to batch"}
+          </span>
+          <span>
+            <a
+              href={PRICING_URL}
+              onClick={(e) => {
+                e.preventDefault();
+                window.open(PRICING_URL, "_blank");
+              }}
+              style={{ color: "inherit", textDecoration: "underline dotted" }}
+            >
+              Free in beta · Pricing
+            </a>
+          </span>
         </div>
         <div className="composer-row">
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={onKey}
+            onKeyDown={onTextareaKey}
             placeholder={
               batchMode
-                ? "prompt 1\nprompt 2\nprompt 3"
+                ? "first prompt\nsecond prompt\nthird prompt"
                 : client
                 ? "Ask anything…"
-                : "Connecting…"
+                : "Connecting to OpenClaw…"
             }
             rows={batchMode ? 5 : 1}
           />
           <div className="composer-actions">
             <button
-              className={batchMode ? "batch" : ""}
+              className={`batch-toggle ${batchMode ? "active" : ""}`}
               onClick={() => setBatchMode((v) => !v)}
               title="Toggle batch mode (⌘B)"
             >
-              {batchMode ? "← Single" : "Batch ⚡"}
+              {batchMode ? "▲ BATCH" : "BATCH"}
             </button>
             <button onClick={send} disabled={!client || !input.trim() || sending}>
               {sending ? "…" : "Send"}
