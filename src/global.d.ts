@@ -71,7 +71,9 @@ declare global {
             cost?: number;
           }) => void,
         ) => () => void;
-        onError: (cb: (ev: { turnId: string; error: string }) => void) => () => void;
+        onError: (
+          cb: (ev: { turnId: string; error: string; sessionExpired?: boolean }) => void,
+        ) => () => void;
       };
     };
   }

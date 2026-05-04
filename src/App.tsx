@@ -218,10 +218,28 @@ export function App() {
     const offError = window.flexhaul.chat.onError((ev) => {
       setStreaming(false);
       setActiveTurnId(null);
-      updateActiveMessages((prev) => [
-        ...prev,
-        { role: "system", text: `Error: ${ev.error}` },
-      ]);
+      // v0.1.15: when the runtime reports a session-expired error,
+      // clear the active chat's claudeSessionId so the next turn starts
+      // fresh instead of repeatedly --resume'ing a dead UUID.
+      if (ev.sessionExpired) {
+        setChats((prev) =>
+          prev.map((c) =>
+            c.id === activeId ? { ...c, claudeSessionId: null } : c,
+          ),
+        );
+        updateActiveMessages((prev) => [
+          ...prev,
+          {
+            role: "system",
+            text: "Session expired — next prompt will start a fresh conversation.",
+          },
+        ]);
+      } else {
+        updateActiveMessages((prev) => [
+          ...prev,
+          { role: "system", text: `Error: ${ev.error}` },
+        ]);
+      }
     });
 
     return () => {

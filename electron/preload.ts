@@ -48,7 +48,7 @@ contextBridge.exposeInMainWorld("flexhaul", {
       ipcRenderer.on("prism:chat:end", listener);
       return () => ipcRenderer.removeListener("prism:chat:end", listener);
     },
-    onError: (cb: (ev: { turnId: string; error: string }) => void) => {
+    onError: (cb: (ev: { turnId: string; error: string; sessionExpired?: boolean }) => void) => {
       const listener = (_: unknown, ev: any) => cb(ev);
       ipcRenderer.on("prism:chat:error", listener);
       return () => ipcRenderer.removeListener("prism:chat:error", listener);

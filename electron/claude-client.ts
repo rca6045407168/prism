@@ -74,6 +74,32 @@ function processLine(turn: Turn, line: string): void {
 
   if (type === "system" && parsed.subtype === "init") {
     turn.sessionId = parsed.session_id ?? null;
+    // v0.1.15: log the init event so we can diagnose MCP availability +
+    // tool count + cwd from inside the running app.
+    try {
+      const log = require("electron-log");
+      const mcpServers: any[] = parsed.mcp_servers ?? [];
+      const tools: string[] = parsed.tools ?? [];
+      log.info(
+        "[claude-init]",
+        JSON.stringify({
+          turnId: turn.turnId,
+          model: parsed.model,
+          cwd: parsed.cwd,
+          mcpCount: mcpServers.length,
+          mcpConnected: mcpServers
+            .filter((s: any) => s?.status === "connected")
+            .map((s: any) => s?.name),
+          mcpFailed: mcpServers
+            .filter((s: any) => s?.status !== "connected")
+            .map((s: any) => `${s?.name}=${s?.status}`),
+          toolCount: tools.length,
+          mcpToolCount: tools.filter((t) => t.startsWith("mcp__")).length,
+        }),
+      );
+    } catch {
+      /* logging is best-effort */
+    }
     emit(turn.window, "prism:chat:start", {
       turnId: turn.turnId,
       sessionId: turn.sessionId,
@@ -105,9 +131,30 @@ function processLine(turn: Turn, line: string): void {
 
   if (type === "result") {
     if (parsed.is_error) {
+      // v0.1.15: claude emits a top-level `errors` array on result messages
+      // when something failed (e.g. "No conversation found with session ID:
+      // …" when --resume hits a stale UUID). Prefer that array over `result`.
+      const errorsArray: unknown = parsed.errors;
+      const errorTexts: string[] = Array.isArray(errorsArray)
+        ? errorsArray.filter((e: unknown): e is string => typeof e === "string" && e.length > 0)
+        : [];
+      const fromResult = typeof parsed.result === "string" ? parsed.result : "";
+      const errText =
+        errorTexts.join("; ") || fromResult || "Claude CLI returned an error.";
+
+      // Detect stale --resume target → trigger a transparent retry without
+      // --resume on the next turn by clearing this chat's claudeSessionId.
+      const isSessionExpired =
+        /no conversation found|session not found|conversation not found/i.test(
+          errText,
+        );
+
       turn.errored = true;
-      const errText = parsed.result || "Claude CLI returned an error.";
-      emit(turn.window, "prism:chat:error", { turnId: turn.turnId, error: errText });
+      emit(turn.window, "prism:chat:error", {
+        turnId: turn.turnId,
+        error: errText,
+        sessionExpired: isSessionExpired,
+      });
     } else {
       // Backfill finalText if assistant blocks didn't arrive (shouldn't happen
       // but defensive)
