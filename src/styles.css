@@ -761,6 +761,26 @@ html[data-theme="dark"] {
   font-weight: 600;
 }
 
+.composer button.composer-stop {
+  background: #ef4444;
+  color: white;
+  font-weight: 500;
+}
+.composer button.composer-stop:hover { background: #dc2626; }
+
+/* Streaming "typing" dot — appears at end of an in-flight assistant message */
+.msg.assistant.streaming::after {
+  content: "▌";
+  display: inline-block;
+  margin-left: 2px;
+  color: var(--ink-soft);
+  animation: prism-blink 1s steps(2) infinite;
+}
+
+@keyframes prism-blink {
+  to { opacity: 0; }
+}
+
 /* ── Empty state — explains the wedge ─────────────────────── */
 
 .empty-state {

@@ -1,19 +1,20 @@
 /**
- * Thin client for the OpenClaw gateway WebSocket.
+ * Thin client for the Prism agent runtime's WebSocket.
  *
- * v0.1: just enough to send a chat message and receive the assistant reply.
- * Authenticates via the operator token discovered from ~/.openclaw/devices/paired.json.
+ * v0.1.6 protocol:
+ *   - Connect to ws://127.0.0.1:18789?token=...
+ *   - JSON-RPC-ish requests: { id, method, params } → { id, result }
+ *   - Push events: { method: "chat.delta", params: {...} } for streaming
  *
- * Protocol notes (reverse-engineered from gateway.log + dashboard traffic):
- *   - Connect to ws://127.0.0.1:18789
- *   - First message must include the auth token (sent in the URL or first frame)
- *   - JSON-RPC-ish: { id, method, params } request → { id, result } reply
- *   - Chat send method is `chat.send` (per src/gateway/method-scopes.ts:152)
+ * Streaming model:
+ *   - User-side observable: onAssistantStart / onAssistantDelta / onAssistantEnd
+ *   - Each user turn opens a new "stream"; deltas accumulate, end finalizes
+ *   - abortCurrentTurn() asks the runtime to stop generating
  *
- * v0.2 will:
- *   - Stream incremental tokens
- *   - Subscribe to sessions for multi-turn state
- *   - Properly handle reconnect
+ * The legacy fields onMessage (callback) is kept for back-compat with
+ * earlier versions that received whole messages. Internally we coalesce
+ * stream events into onMessage at completion if no streaming listener
+ * is provided.
  */
 
 export type ChatMessage = {
@@ -23,7 +24,14 @@ export type ChatMessage = {
   batchCount?: number;
 };
 
+export type StreamEvent =
+  | { kind: "start"; turnId: string }
+  | { kind: "delta"; turnId: string; text: string }
+  | { kind: "end"; turnId: string; finalText: string }
+  | { kind: "error"; turnId: string; error: string };
+
 type Listener = (msg: ChatMessage) => void;
+type StreamListener = (ev: StreamEvent) => void;
 
 let nextId = 1;
 
@@ -31,6 +39,9 @@ export class GatewayClient {
   private ws: WebSocket | null = null;
   private pending = new Map<number, (result: any) => void>();
   private rejecters = new Map<number, (err: Error) => void>();
+  private streamListener: StreamListener | null = null;
+  // Track in-flight turns by id so abort can target them.
+  private currentTurnId: string | null = null;
 
   constructor(
     private url: string,
@@ -38,14 +49,18 @@ export class GatewayClient {
     private onMessage: Listener,
   ) {}
 
+  /** Subscribe to streaming events. Optional — if not set, full assistant
+   *  messages still arrive via onMessage on turn end. */
+  onStream(cb: StreamListener): void {
+    this.streamListener = cb;
+  }
+
   async connect(): Promise<void> {
     return new Promise((resolve, reject) => {
       const u = new URL(this.url);
       u.searchParams.set("token", this.token);
       this.ws = new WebSocket(u.toString());
 
-      // Hard timeout: if the daemon doesn't ack in 6s, give up so the UI
-      // can show an error rather than spin forever. (v0.1.3)
       const timer = setTimeout(() => {
         try {
           this.ws?.close();
@@ -63,7 +78,6 @@ export class GatewayClient {
       };
       this.ws.onclose = (e) => {
         clearTimeout(timer);
-        // Surface unexpected closes to the UI as a system message
         if (e.code !== 1000 && e.code !== 1001) {
           this.onMessage({
             role: "system",
@@ -83,7 +97,7 @@ export class GatewayClient {
       return;
     }
 
-    // Reply to a request we sent
+    // Response to a request we sent
     if (parsed.id && this.pending.has(parsed.id)) {
       const cb = this.pending.get(parsed.id)!;
       this.pending.delete(parsed.id);
@@ -92,8 +106,38 @@ export class GatewayClient {
       return;
     }
 
-    // Push notification: assistant message arrived
-    // Shape varies by gateway version; try common fields.
+    // Streaming events from the runtime
+    const method = parsed.method;
+    const params = parsed.params ?? {};
+    const turnId = params.turnId ?? params.turn_id ?? "unknown";
+
+    if (method === "chat.start" || method === "chat.delta" || method === "chat.end" || method === "chat.error") {
+      if (method === "chat.start") {
+        this.currentTurnId = turnId;
+        this.streamListener?.({ kind: "start", turnId });
+      } else if (method === "chat.delta") {
+        const text = String(params.text ?? params.delta ?? "");
+        if (text) this.streamListener?.({ kind: "delta", turnId, text });
+      } else if (method === "chat.end") {
+        const finalText = String(params.text ?? params.final ?? "");
+        this.currentTurnId = null;
+        this.streamListener?.({ kind: "end", turnId, finalText });
+        if (!this.streamListener && finalText) {
+          // Backwards-compat: emit as whole message if no streamer attached
+          this.onMessage({ role: "assistant", text: finalText });
+        }
+      } else if (method === "chat.error") {
+        this.currentTurnId = null;
+        this.streamListener?.({
+          kind: "error",
+          turnId,
+          error: String(params.error ?? "Runtime error"),
+        });
+      }
+      return;
+    }
+
+    // Legacy whole-message push (older runtime versions)
     const text =
       parsed?.result?.text ??
       parsed?.params?.text ??
@@ -115,7 +159,6 @@ export class GatewayClient {
       this.pending.set(id, resolve);
       this.rejecters.set(id, reject);
       this.ws!.send(payload);
-      // Generous timeout — agent turns can take 30s+
       setTimeout(() => {
         if (this.pending.has(id)) {
           this.pending.delete(id);
@@ -126,20 +169,30 @@ export class GatewayClient {
     });
   }
 
-  /**
-   * Send a chat message and wait for the assistant's reply.
-   * The reply arrives async via onMessage; this just confirms the dispatch.
-   *
-   * `model` is the user's chosen model alias from Settings. "auto" lets
-   * the auto-model-select skill route per prompt; any other value pins.
-   */
   async send(text: string, model: string = "auto"): Promise<void> {
     await this.rpc("chat.send", {
       sessionKey: "main",
       message: text,
       channel: "webchat",
       model: model === "auto" ? undefined : model,
+      stream: true,
     });
+  }
+
+  /** Ask the runtime to stop generating the in-flight turn. Best-effort —
+   *  the runtime may have already finished, in which case this is a no-op. */
+  async abort(): Promise<void> {
+    if (!this.currentTurnId) return;
+    try {
+      await this.rpc("chat.abort", { turnId: this.currentTurnId });
+    } catch {
+      // ignore — even on abort failure we want UI to settle
+    }
+    this.currentTurnId = null;
+  }
+
+  isStreaming(): boolean {
+    return this.currentTurnId !== null;
   }
 
   close(): void {

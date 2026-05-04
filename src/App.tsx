@@ -53,6 +53,7 @@ export function App() {
   const [input, setInput] = useState("");
   const [batchMode, setBatchMode] = useState(false);
   const [sending, setSending] = useState(false);
+  const [streaming, setStreaming] = useState(false);
   const chatRef = useRef<HTMLDivElement>(null);
 
   const activeChat = useMemo(
@@ -148,6 +149,50 @@ export function App() {
           if (cancelled) return;
           updateActiveMessages((prev) => [...prev, msg]);
         });
+
+        // Streaming: append a placeholder assistant message at start, mutate
+        // its text in place on each delta, finalize on end.
+        c.onStream((ev) => {
+          if (cancelled) return;
+          if (ev.kind === "start") {
+            updateActiveMessages((prev) => [
+              ...prev,
+              { role: "assistant", text: "" },
+            ]);
+            setStreaming(true);
+          } else if (ev.kind === "delta") {
+            updateActiveMessages((prev) => {
+              if (prev.length === 0) return prev;
+              const next = [...prev];
+              const last = next[next.length - 1];
+              if (last.role === "assistant") {
+                next[next.length - 1] = { ...last, text: last.text + ev.text };
+              }
+              return next;
+            });
+          } else if (ev.kind === "end") {
+            setStreaming(false);
+            // If runtime sent a final non-empty text and we accumulated nothing,
+            // backfill so we don't show an empty bubble.
+            updateActiveMessages((prev) => {
+              if (prev.length === 0) return prev;
+              const last = prev[prev.length - 1];
+              if (last.role === "assistant" && last.text === "" && ev.finalText) {
+                const next = [...prev];
+                next[next.length - 1] = { ...last, text: ev.finalText };
+                return next;
+              }
+              return prev;
+            });
+          } else if (ev.kind === "error") {
+            setStreaming(false);
+            updateActiveMessages((prev) => [
+              ...prev,
+              { role: "system", text: `Error: ${ev.error}` },
+            ]);
+          }
+        });
+
         await c.connect();
         if (cancelled) return;
         setClient(c);
@@ -381,9 +426,11 @@ export function App() {
               </div>
             </div>
           )}
-          {messages.map((m, i) => (
-            <Message key={i} message={m} />
-          ))}
+          {messages.map((m, i) => {
+            const isLast = i === messages.length - 1;
+            const isStreaming = streaming && isLast && m.role === "assistant";
+            return <Message key={i} message={m} streaming={isStreaming} />;
+          })}
         </div>
 
         <div className={`composer ${batchMode ? "batch-active" : ""}`}>
@@ -444,9 +491,19 @@ export function App() {
               >
                 {batchMode ? "▲ BATCH" : "BATCH"}
               </button>
-              <button onClick={send} disabled={!client || !input.trim() || sending}>
-                {sending ? "…" : "Send"}
-              </button>
+              {streaming ? (
+                <button
+                  onClick={() => client?.abort()}
+                  className="composer-stop"
+                  title="Stop generating"
+                >
+                  ■ Stop
+                </button>
+              ) : (
+                <button onClick={send} disabled={!client || !input.trim() || sending}>
+                  {sending ? "…" : "Send"}
+                </button>
+              )}
             </div>
           </div>
         </div>

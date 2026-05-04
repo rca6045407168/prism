@@ -62,9 +62,10 @@ function CodeBlock({ children, language }: { children: string; language: string 
 
 type Props = {
   message: ChatMessage;
+  streaming?: boolean;
 };
 
-export function Message({ message }: Props) {
+export function Message({ message, streaming = false }: Props) {
   const [copiedAll, setCopiedAll] = useState(false);
 
   const copyAll = async () => {
@@ -96,7 +97,7 @@ export function Message({ message }: Props) {
 
   // Assistant — markdown render
   return (
-    <div className="msg assistant">
+    <div className={`msg assistant${streaming ? " streaming" : ""}`}>
       <button className="msg-copy" onClick={copyAll} title="Copy message">
         {copiedAll ? "Copied" : "Copy"}
       </button>
