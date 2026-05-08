@@ -91,6 +91,57 @@ function stringifyToolResult(content: unknown): string {
 }
 
 /**
+ * Heuristic auto-router. Picks a model tier when the user has "Auto"
+ * selected in the model picker.
+ *
+ * Why a heuristic and not a Haiku classifier call: a pre-flight LLM
+ * call doubles latency on every turn and the cost saving over a static
+ * heuristic is small. This is good enough — it gets the easy 30% of
+ * turns onto haiku (trivia, acks, lookups) and pushes obvious reasoning
+ * work onto opus, with sonnet as the safe default.
+ *
+ * The user's selection of "auto" is honored here; explicit model picks
+ * (haiku/sonnet/opus/etc.) bypass this function.
+ *
+ * Verbal-precision note: claude CLI accepts the alias names directly
+ * (haiku → claude-haiku-4-5, sonnet → claude-sonnet-4-6, opus →
+ * claude-opus-4-7 as of 2026-05). We pass aliases.
+ */
+export function routeModel(message: string): "haiku" | "sonnet" | "opus" {
+  const text = (message ?? "").toLowerCase();
+  const len = message.length;
+
+  // Trivial / acknowledgement: haiku
+  if (len < 30) return "haiku";
+
+  // Strong reasoning / architecture / debugging signals: opus
+  const opusSignals = [
+    /\bimplement\b/,
+    /\barchitect/,
+    /\bdesign\b.{0,40}\b(system|api|schema|database|protocol)\b/,
+    /\brefactor\b/,
+    /\bdebug\b/,
+    /\bdiagnose\b/,
+    /\boptimi[sz]e\b/,
+    /\breview\b.{0,40}\b(code|pr|patch|design|architecture)\b/,
+    /\banalyze\b.{0,40}\b(architecture|design|tradeoff|root.?cause)\b/,
+    /\bplan\b.{0,40}\b(migration|rollout|release|cutover)\b/,
+    /```/, // user pasted code
+  ];
+  if (opusSignals.some((re) => re.test(text))) return "opus";
+
+  // Long prompts probably want reasoning depth
+  if (len > 1500) return "opus";
+  if (len > 600) return "sonnet";
+
+  // Short factual question: haiku
+  if (text.trim().endsWith("?") && len < 140) return "haiku";
+
+  // Default
+  return "sonnet";
+}
+
+/**
  * Parse the stream-json line. Returns `null` if not a JSON object we care
  * about. Otherwise classifies into UI events.
  */
@@ -277,7 +328,28 @@ function send(params: {
     "--permission-mode", "bypassPermissions",
     "--allow-dangerously-skip-permissions",
   ];
-  if (params.model && params.model !== "auto") {
+  // v0.1.21: real auto-routing. "Auto" goes through the heuristic
+  // router; explicit picks pass through unchanged. We log which tier
+  // was chosen for auto turns so [claude-init] shows it alongside the
+  // actual model claude reports back.
+  let routedModel: string | null = null;
+  if (params.model === "auto") {
+    routedModel = routeModel(params.message);
+    args.push("--model", routedModel);
+    try {
+      require("electron-log").info(
+        "[auto-route]",
+        JSON.stringify({
+          turnId,
+          tier: routedModel,
+          messageLen: params.message.length,
+          messagePreview: params.message.slice(0, 80),
+        }),
+      );
+    } catch {
+      /* logging best-effort */
+    }
+  } else if (params.model && params.model !== "auto") {
     args.push("--model", params.model);
   }
   if (params.sessionId) {
