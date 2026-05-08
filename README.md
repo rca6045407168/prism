@@ -2,74 +2,66 @@
 
 > Type N prompts. Get N parallel agents. Reconciled into one answer.
 
-Prism is a desktop AI agent platform. Unlike chat-first tools, Prism is built
-around **parallel batch input** — you submit multiple prompts at once, they
-fan out to N parallel agents, and the results come back as one synthesized
-answer. Auto-routes across multiple model vendors (Anthropic, OSS, local)
-based on prompt complexity. Runs on your machine.
+Prism is a desktop AI agent that wraps the Anthropic `claude` CLI in
+an Electron app. It adds a chat UI, multi-chat persistence, silent
+auto-profile memory, slash-command discovery, live tool-progress
+rendering, an artifacts pane (HTML / SVG / Mermaid / Python / diff),
+a heuristic auto-router, and an integrated token saver. Runs entirely
+on your machine.
+
+For the engineering ground truth, see
+**[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
 
 ## Install
 
-Download the latest `Prism-x.y.z.dmg` from
+Download the latest `Prism-x.y.z-arm64.dmg` from
 [Releases](https://github.com/rca6045407168/prism/releases/latest)
 and drag to Applications.
 
-First launch will show "Prism can't be opened because it's from an
-unidentified developer" — Right-click → Open → Open. (One-time bypass;
-code signing ships in v0.2.)
+First launch shows "Prism can't be opened because it's from an
+unidentified developer" — right-click → Open → Open. One-time bypass;
+code signing ships in v0.2.
+
+Apple Silicon (M1+) is the supported install target. Intel Macs are
+supported by the auto-update path (.zip), so once installed updates work
+in both arches.
 
 ## Auto-update
 
-Every launch checks Releases. When a new version is available, a banner
-appears in the app. One click downloads + restarts. No reinstall needed.
+Electron-updater checks GitHub Releases on every launch. When a new
+version is available, a banner appears in the titlebar. One click
+downloads + restarts — no reinstall.
 
-## Status
+## What's shipped
 
-**v0.1 (current):** chat window, batch mode (⌘B), auto-update, brand
-shell. Requires manual one-time setup of the agent runtime — see
-v0.2 below for the auto-installer.
-
-**v0.2 (in progress):**
-
-- One-click auto-installer for the agent runtime (no terminal commands)
-- First-launch onboarding scanner that imports existing skills, memory,
-  vault from your machine
-- Stripe payment integration
-- Streaming token deltas in chat
-
-**v1.0:**
-
-- Code signing + notarization (no Gatekeeper warning)
-- Bundled runtime (zero external dependencies)
-- Multi-tenant support (per-employee brain)
-- Customer skill marketplace
+- **Chat** — multi-chat sidebar, search, rename, delete, edit-and-regenerate
+- **Auto-profile** — silent learning of stable preferences (Settings → Memory)
+- **Slash commands** — type `/` to autocomplete from `~/.claude/commands/` and `~/.claude/skills/`
+- **Tool-progress rail** — live indicator of which MCP tools are firing per turn
+- **Artifacts pane** — live HTML / SVG / Mermaid / diff / Python preview
+- **Auto-router** — the "Auto" model picker option actually picks haiku/sonnet/opus per-prompt
+- **Token saver** — RTK integration; Settings → Speed tab
+- **Batch mode** (⌘B) — multi-prompt fan-out via the `batch-orchestrator` skill
 
 ## Develop
 
 ```bash
 npm install
 npm run dev          # vite dev server
-npm start            # electron app pointing at dev server
+npm start            # electron pointing at the dev server
 
-npm run dist         # build .dmg locally without publishing
+npm run dist         # build local .dmg/.zip without publishing
 ```
 
 ## Cut a release
 
-```bash
-# bump version in package.json
-git tag v0.2.0
-git push --tags
-```
-
-GitHub Actions builds the `.dmg` and publishes to Releases.
-electron-updater on installed clients auto-discovers the next time
-they check (within ~24h, or immediately on next launch).
+See [docs/ARCHITECTURE.md § Build, release, auto-update](docs/ARCHITECTURE.md#build-release-auto-update).
 
 ## Credits
 
-Built on top of open-source components. See [ATTRIBUTION.md](./ATTRIBUTION.md).
+Built on top of open-source components. See [ATTRIBUTION.md](ATTRIBUTION.md).
 
 ## License
 
 MIT.
+
