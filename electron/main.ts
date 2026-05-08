@@ -27,6 +27,7 @@ import {
   clearAll,
 } from "./profile-store";
 import { listCommands, refreshCommandsCache } from "./commands";
+import { getStatus as getRtkStatus, enableHook as enableRtkHook } from "./rtk";
 
 // ---------- logging ----------
 log.transports.file.level = "info";
@@ -132,6 +133,10 @@ ipcMain.handle("prism:commands:refresh", () => {
   refreshCommandsCache();
   return listCommands();
 });
+
+// ---------- RTK token saver (v0.1.19) ----------
+ipcMain.handle("prism:rtk:status", () => getRtkStatus());
+ipcMain.handle("prism:rtk:enableHook", () => enableRtkHook());
 ipcMain.handle("flexhaul:checkForUpdates", async () => {
   try {
     const result = await autoUpdater.checkForUpdates();

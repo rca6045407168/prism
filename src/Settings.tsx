@@ -61,6 +61,12 @@ const DIMENSION_LABELS: Record<ProfileDimension, string> = {
   knowledge: "Domain knowledge",
 };
 
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "M";
+  if (n >= 1_000) return (n / 1_000).toFixed(1) + "K";
+  return String(n);
+}
+
 const DIMENSION_ORDER: ProfileDimension[] = [
   "anti_patterns",
   "communication_style",
@@ -81,9 +87,12 @@ type Props = {
 
 export function SettingsModal({ open, onClose, onChange, current }: Props) {
   const [draft, setDraft] = useState<Settings>(current);
-  const [tab, setTab] = useState<"general" | "memory">("general");
+  const [tab, setTab] = useState<"general" | "memory" | "speed">("general");
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [confirmingClear, setConfirmingClear] = useState(false);
+  const [rtkStatus, setRtkStatus] = useState<RtkStatus | null>(null);
+  const [enablingHook, setEnablingHook] = useState(false);
+  const [hookFlash, setHookFlash] = useState<string | null>(null);
 
   useEffect(() => {
     setDraft(current);
@@ -94,6 +103,36 @@ export function SettingsModal({ open, onClose, onChange, current }: Props) {
     if (!open) return;
     window.flexhaul.profile.get().then(setProfile).catch(() => {});
   }, [open, tab]);
+
+  // Refresh RTK status when modal opens or Speed tab is selected.
+  useEffect(() => {
+    if (!open) return;
+    if (tab !== "speed") return;
+    window.flexhaul.rtk.status().then(setRtkStatus).catch(() => {});
+  }, [open, tab]);
+
+  const onEnableHook = async () => {
+    setEnablingHook(true);
+    setHookFlash(null);
+    try {
+      const res = await window.flexhaul.rtk.enableHook();
+      if (res.ok) {
+        setHookFlash(
+          res.alreadyPresent
+            ? "Already enabled."
+            : res.backupPath
+            ? `Enabled. Settings backed up to ${res.backupPath}.`
+            : "Enabled.",
+        );
+        const next = await window.flexhaul.rtk.status();
+        setRtkStatus(next);
+      } else {
+        setHookFlash(res.error ?? "Failed to enable hook.");
+      }
+    } finally {
+      setEnablingHook(false);
+    }
+  };
 
   if (!open) return null;
 
@@ -146,6 +185,17 @@ export function SettingsModal({ open, onClose, onChange, current }: Props) {
             Memory
             {profile && profile.entries.length > 0 ? (
               <span className="settings-tab-count">{profile.entries.length}</span>
+            ) : null}
+          </button>
+          <button
+            className={`settings-tab ${tab === "speed" ? "active" : ""}`}
+            onClick={() => setTab("speed")}
+          >
+            Speed
+            {rtkStatus?.stats && rtkStatus.stats.totalSavedTokens > 0 ? (
+              <span className="settings-tab-count">
+                {formatTokens(rtkStatus.stats.totalSavedTokens)}
+              </span>
             ) : null}
           </button>
         </div>
@@ -319,6 +369,123 @@ export function SettingsModal({ open, onClose, onChange, current }: Props) {
             )}
           </div>
         )}
+
+        {tab === "speed" ? (
+          <div className="settings-body">
+            <div className="settings-memory-intro">
+              <p>
+                Prism speeds up Claude by piping verbose tool output (git,
+                find, grep, gcloud, …) through{" "}
+                <a
+                  href="https://github.com/rtk-ai/rtk"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    window.open("https://github.com/rtk-ai/rtk", "_blank");
+                  }}
+                >
+                  RTK
+                </a>
+                {" "}— an open-source CLI proxy that compresses output before it
+                reaches the model. 60–90% fewer tokens on dev work; the model
+                gets a cleaner signal too.
+              </p>
+              <p className="settings-hint">
+                Runs locally. No data leaves your machine. Wired through the
+                same Claude settings hook your terminal uses.
+              </p>
+            </div>
+
+            {rtkStatus === null ? (
+              <div className="settings-memory-empty">Checking…</div>
+            ) : !rtkStatus.installed ? (
+              <div className="settings-rtk-step">
+                <div className="settings-rtk-step-title">
+                  Step 1 — Install RTK
+                </div>
+                <div className="settings-rtk-step-body">
+                  {rtkStatus.hint ?? "RTK isn't on your machine yet."}
+                </div>
+                <button
+                  className="settings-secondary"
+                  onClick={() =>
+                    window.open("https://github.com/rtk-ai/rtk", "_blank")
+                  }
+                >
+                  View install instructions
+                </button>
+              </div>
+            ) : (
+              <>
+                <div className="settings-rtk-status">
+                  <div className="settings-rtk-status-row">
+                    <span className="settings-rtk-status-icon ok">✓</span>
+                    <span className="settings-rtk-status-label">RTK installed</span>
+                    {rtkStatus.version ? (
+                      <span className="settings-rtk-status-meta">
+                        {rtkStatus.version}
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="settings-rtk-status-row">
+                    <span
+                      className={`settings-rtk-status-icon ${
+                        rtkStatus.hookEnabled ? "ok" : "warn"
+                      }`}
+                    >
+                      {rtkStatus.hookEnabled ? "✓" : "!"}
+                    </span>
+                    <span className="settings-rtk-status-label">
+                      {rtkStatus.hookEnabled
+                        ? "Claude hook enabled — Prism is using RTK"
+                        : "Claude hook not enabled — Prism is bypassing RTK"}
+                    </span>
+                    {!rtkStatus.hookEnabled ? (
+                      <button
+                        className="settings-rtk-enable"
+                        onClick={onEnableHook}
+                        disabled={enablingHook}
+                      >
+                        {enablingHook ? "Enabling…" : "Enable"}
+                      </button>
+                    ) : null}
+                  </div>
+                  {hookFlash ? (
+                    <div className="settings-rtk-flash">{hookFlash}</div>
+                  ) : null}
+                </div>
+
+                {rtkStatus.stats ? (
+                  <div className="settings-rtk-stats">
+                    <div className="settings-rtk-stats-grid">
+                      <div className="settings-rtk-stat">
+                        <div className="settings-rtk-stat-value">
+                          {formatTokens(rtkStatus.stats.totalSavedTokens)}
+                        </div>
+                        <div className="settings-rtk-stat-label">tokens saved</div>
+                      </div>
+                      <div className="settings-rtk-stat">
+                        <div className="settings-rtk-stat-value">
+                          {rtkStatus.stats.avgSavingsPct.toFixed(0)}%
+                        </div>
+                        <div className="settings-rtk-stat-label">avg compression</div>
+                      </div>
+                      <div className="settings-rtk-stat">
+                        <div className="settings-rtk-stat-value">
+                          {rtkStatus.stats.totalCommands.toLocaleString()}
+                        </div>
+                        <div className="settings-rtk-stat-label">commands wrapped</div>
+                      </div>
+                    </div>
+                    <div className="settings-hint" style={{ marginTop: 6 }}>
+                      Stats from <code>rtk gain</code> — global across every
+                      Claude session on this machine.
+                    </div>
+                  </div>
+                ) : null}
+              </>
+            )}
+          </div>
+        ) : null}
 
         <div className="settings-footer">
           {tab === "general" ? (

@@ -1148,6 +1148,131 @@ html[data-theme="dark"] {
   font-weight: 500;
 }
 
+/* ── Speed tab / RTK (v0.1.19) ───────────────────────────────── */
+
+.settings-rtk-status {
+  margin-top: 8px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+
+.settings-rtk-status-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  padding: 4px 0;
+}
+
+.settings-rtk-status-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: 600;
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.settings-rtk-status-icon.ok   { background: #4ac29a; }
+.settings-rtk-status-icon.warn { background: #ffac41; color: #2a1a00; }
+
+.settings-rtk-status-label {
+  flex: 1;
+  color: var(--ink);
+}
+
+.settings-rtk-status-meta {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-mute);
+}
+
+.settings-rtk-enable {
+  background: var(--ink);
+  color: var(--bg);
+  padding: 4px 12px;
+  border-radius: 5px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.settings-rtk-enable:disabled {
+  opacity: 0.55;
+}
+
+.settings-rtk-flash {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--ink-soft);
+  background: rgba(74, 194, 154, 0.08);
+  border: 1px solid rgba(74, 194, 154, 0.24);
+  border-radius: 5px;
+  padding: 6px 10px;
+}
+
+.settings-rtk-step {
+  margin-top: 8px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px;
+}
+
+.settings-rtk-step-title {
+  font-size: 13px;
+  color: var(--ink);
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+
+.settings-rtk-step-body {
+  font-size: 13px;
+  color: var(--ink-soft);
+  line-height: 1.5;
+  margin-bottom: 10px;
+}
+
+.settings-rtk-stats {
+  margin-top: 16px;
+}
+
+.settings-rtk-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.settings-rtk-stat {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 12px;
+  text-align: center;
+}
+
+.settings-rtk-stat-value {
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--ink);
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+
+.settings-rtk-stat-label {
+  font-size: 11px;
+  font-family: var(--mono);
+  color: var(--ink-mute);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-top: 4px;
+}
+
 /* ── Banners ──────────────────────────────────────────────────── */
 
 .update-banner {

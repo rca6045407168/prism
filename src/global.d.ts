@@ -42,6 +42,21 @@ type DiscoveredCommand = {
   filePath: string;
 };
 
+type RtkStatus = {
+  installed: boolean;
+  hookEnabled: boolean;
+  version: string | null;
+  stats: {
+    totalCommands: number;
+    totalSavedTokens: number;
+    totalInputTokens: number;
+    totalOutputTokens: number;
+    avgSavingsPct: number;
+    avgTimeMs: number;
+  } | null;
+  hint?: string;
+};
+
 declare global {
   interface Window {
     flexhaul: {
@@ -131,6 +146,15 @@ declare global {
       commands: {
         list: () => Promise<DiscoveredCommand[]>;
         refresh: () => Promise<DiscoveredCommand[]>;
+      };
+      rtk: {
+        status: () => Promise<RtkStatus>;
+        enableHook: () => Promise<{
+          ok: boolean;
+          alreadyPresent?: boolean;
+          backupPath?: string;
+          error?: string;
+        }>;
       };
     };
   }

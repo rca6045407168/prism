@@ -67,6 +67,12 @@ contextBridge.exposeInMainWorld("flexhaul", {
     refresh: () => ipcRenderer.invoke("prism:commands:refresh"),
   },
 
+  // RTK token saver (v0.1.19) — surfaces savings + hook health
+  rtk: {
+    status: () => ipcRenderer.invoke("prism:rtk:status"),
+    enableHook: () => ipcRenderer.invoke("prism:rtk:enableHook"),
+  },
+
   // Auto-profile (v0.1.17) — local-only, silent learning of user
   // preferences for a more personalized chat over time.
   profile: {
