@@ -42,6 +42,7 @@ downloads + restarts — no reinstall.
 - **Auto-router** — the "Auto" model picker option actually picks haiku/sonnet/opus per-prompt
 - **Token saver** — RTK integration; Settings → Speed tab
 - **Batch mode** (⌘B) — multi-prompt fan-out via the `batch-orchestrator` skill
+- **Adversarial debate** — `/debate` runs 2-round critic/proposer/judge before shipping high-stakes drafts. See [docs/ARCHITECTURE.md § Adversarial debate](docs/ARCHITECTURE.md#adversarial-debate--prismskillsdebatemd).
 
 ## Develop
 

@@ -263,6 +263,74 @@ the `SlashCommandMenu` dropdown when the input begins with `/`. Selection
 inserts `/<name> ` into the composer; the actual command resolution
 happens inside claude itself — we just surface them.
 
+**Prism-vendored skills** that ship with the repo and are intended for
+automatic install via the v0.2 onboarding scanner live at `prism/skills/`:
+
+| File | Skill | Purpose |
+|---|---|---|
+| `skills/debate.md` | `debate` | Adversarial 2-round critique → revise → critique → judge before shipping high-stakes external content. See [Adversarial debate](#adversarial-debate--prismskillsdebatemd) below. |
+
+For now, install vendored skills manually:
+
+```bash
+mkdir -p ~/.claude/skills/debate
+cp prism/skills/debate.md ~/.claude/skills/debate/SKILL.md
+```
+
+### Adversarial debate — `prism/skills/debate.md`
+
+A pre-ship stress-test for high-stakes external content (cold emails,
+investor outreach, fundraising material, accelerator applications,
+pricing emails, anything ≥250 words going to someone who matters).
+
+**Triggers** — user types `/debate`, `/critique`, `/stresstest`, or
+`/devils-advocate`; says "stress test", "challenge this", "play
+devil's advocate", "red team this", "poke holes", "sanity check";
+flags a draft as "sounds like AI" / "isn't in my voice"; or asks for
+an external draft ≥100 words.
+
+**Protocol (4 steps inside one assistant turn):**
+
+```
+  draft  →  Round 1 Critic  →  Proposer revises  →  Round 2 Critic  →  Judge
+                 (7 dims)                                                  (SHIP / REVISE_AGAIN / SCRAP)
+```
+
+The critic reviews across seven dimensions: unsupported claims (rated
+FABRICATED/HIGH/MEDIUM/LOW), overconfidence, empty calories, strongest
+counterargument, audience test, steel-man-the-opposite, AI-tone tells.
+Proposer revises against findings. Round 2 critic reviews the revision.
+Judge calls SHIP / REVISE_AGAIN / SCRAP. Hard cap at 3 rounds.
+
+**Output contract:** the skill prepends a debate-summary block before
+the final draft so the user can audit that the debate actually ran:
+
+```
+┌── Adversarial debate ──────────────────────────────┐
+│ Rounds run: 2                                  │
+│ Round 1 severity: BLOCKING                     │
+│ Round 2 severity: MINOR                        │
+│ Judge verdict: SHIP                            │
+│ Top fixes applied: …                            │
+│ Residual risks: …                              │
+└────────────────────────────────────────┘
+
+<final revised draft>
+```
+
+A missing debate-summary block on a triggering category indicates the
+skill was bypassed — a process-failure event analogous to FlexHaul's
+MST-class bugs.
+
+**Cost:** ~$0.05–$0.15 per debate (5 Task subagent calls at sonnet
+rates). Rounding error vs the cost of shipping a bad cold email.
+
+**Standalone alternatives** for offline / batch / measurable use
+(scoring 200 emails overnight, optimizing the critic prompt against
+historical reply data) live at
+`outputs/adversarial-debate-frameworks/`: AutoGen, LangGraph, CrewAI,
+DSPy implementations of the same 2-round pattern.
+
 ### Tool-progress rail — `claude-client.ts` events → `Message.tsx::ToolStrip`
 
 Every `tool_use` block in an assistant message and every `tool_result`
