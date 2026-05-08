@@ -15,7 +15,7 @@
  * text.
  */
 
-export type ArtifactType = "html" | "svg" | "mermaid";
+export type ArtifactType = "html" | "svg" | "mermaid" | "diff" | "python";
 
 export type Artifact = {
   id: string;
@@ -32,6 +32,10 @@ const SUPPORTED_LANGS: Record<string, ArtifactType> = {
   svg: "svg",
   mermaid: "mermaid",
   mmd: "mermaid",
+  diff: "diff",
+  patch: "diff",
+  python: "python",
+  py: "python",
 };
 
 /**
@@ -55,6 +59,24 @@ function titleFor(type: ArtifactType, content: string, fallback: number): string
     const m = content.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
     if (m) return m[1].trim().slice(0, 60);
     return `SVG preview ${fallback}`;
+  }
+  if (type === "diff") {
+    // Look for a "+++ b/<path>" header — that's the typical filename.
+    const m = content.match(/^\+\+\+ b\/([^\n]+)/m) ||
+              content.match(/^\+\+\+ ([^\n]+)/m);
+    if (m) return m[1].trim().slice(0, 60);
+    return `Diff ${fallback}`;
+  }
+  if (type === "python") {
+    // First non-blank line, often a comment or import — gives a hint.
+    for (const line of content.split("\n")) {
+      const t = line.trim();
+      if (!t) continue;
+      if (t.startsWith("#")) return t.replace(/^#+\s*/, "").slice(0, 60);
+      if (t.startsWith("import ") || t.startsWith("from ")) return t.slice(0, 60);
+      return t.slice(0, 60);
+    }
+    return `Python ${fallback}`;
   }
   // mermaid — first non-empty line is usually the diagram type
   const firstLine = content.split("\n").find((l) => l.trim());

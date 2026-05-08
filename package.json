@@ -1,6 +1,6 @@
 {
   "name": "prism",
-  "version": "0.1.19",
+  "version": "0.1.20",
   "description": "Prism — type N prompts, get N parallel agents, reconciled into one answer.",
   "author": {
     "name": "Richard Chen",
@@ -86,9 +86,11 @@
   "dependencies": {
     "electron-log": "^5.2.4",
     "electron-updater": "^6.3.9",
-    "prism-react-renderer": "^2.4.1",
+    "gpt-tokenizer": "^3.4.0",
+    "react-diff-viewer-continued": "^4.2.2",
     "react-markdown": "^9.1.0",
-    "remark-gfm": "^4.0.1"
+    "remark-gfm": "^4.0.1",
+    "shiki": "^4.0.2"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

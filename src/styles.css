@@ -522,6 +522,158 @@ textarea, input {
   margin-top: 8px;
 }
 
+/* Diff renderer */
+.artifact-diff {
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.55;
+  padding: 0;
+  background: var(--bg);
+}
+
+.diff-line {
+  display: flex;
+  padding: 0 12px;
+  white-space: pre;
+  min-height: 1.55em;
+}
+
+.diff-prefix {
+  width: 14px;
+  flex-shrink: 0;
+  color: var(--ink-mute);
+  font-weight: 600;
+}
+
+.diff-text {
+  flex: 1;
+  overflow-x: auto;
+}
+
+.diff-add {
+  background: rgba(74, 194, 154, 0.12);
+  color: #2a8060;
+}
+
+.diff-add .diff-prefix {
+  color: #2a8060;
+}
+
+.diff-del {
+  background: rgba(192, 57, 43, 0.12);
+  color: #a83524;
+}
+
+.diff-del .diff-prefix {
+  color: #a83524;
+}
+
+.diff-context {
+  color: var(--ink-soft);
+}
+
+.diff-fileheader {
+  background: var(--bg-input);
+  color: var(--ink-soft);
+  font-weight: 500;
+  padding: 2px 12px;
+}
+
+.diff-hunk {
+  background: rgba(77, 150, 255, 0.08);
+  color: var(--ink-soft);
+  padding: 2px 12px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .diff-add { color: #6eddae; background: rgba(74, 194, 154, 0.15); }
+  .diff-add .diff-prefix { color: #6eddae; }
+  .diff-del { color: #f08372; background: rgba(192, 57, 43, 0.18); }
+  .diff-del .diff-prefix { color: #f08372; }
+}
+
+/* Python (Pyodide) artifact */
+.artifact-python {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.artifact-python-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.artifact-python-run {
+  background: var(--ink);
+  color: var(--bg);
+  padding: 5px 14px;
+  border-radius: 5px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.artifact-python-run:disabled {
+  opacity: 0.55;
+}
+
+.artifact-python-status {
+  font-size: 12px;
+  color: var(--ink-mute);
+  font-family: var(--mono);
+}
+
+.artifact-python-source {
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.55;
+  padding: 12px 14px;
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink-soft);
+  white-space: pre-wrap;
+  flex: 1;
+  overflow-y: auto;
+}
+
+.artifact-python-output {
+  border-top: 1px solid var(--border);
+  background: var(--bg-input);
+  padding: 10px 14px;
+  max-height: 50%;
+  overflow-y: auto;
+}
+
+.artifact-python-output-label {
+  font-size: 10px;
+  font-family: var(--mono);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-mute);
+  margin-bottom: 4px;
+}
+
+.artifact-python-output pre {
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink);
+  white-space: pre-wrap;
+  margin: 0;
+}
+
+.artifact-python-note {
+  border-top: 1px solid var(--border);
+  padding: 8px 14px;
+  font-size: 11px;
+  color: var(--ink-mute);
+  background: var(--bg);
+}
+
 .artifact-strip {
   display: flex;
   flex-wrap: wrap;
@@ -701,6 +853,19 @@ textarea, input {
 .tool-result {
   color: var(--ink-soft);
   padding-left: 18px;
+}
+
+/* ── Composer token counter (v0.1.20) ────────────────────────── */
+
+.composer-tokens {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-mute);
+  padding: 2px 7px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-input);
+  font-variant-numeric: tabular-nums;
 }
 
 /* ── Slash command autocomplete (v0.1.18) ────────────────────── */
@@ -1744,6 +1909,33 @@ html[data-theme="dark"] {
   font-size: 12.5px;
   line-height: 1.5;
   overflow-x: auto;
+}
+
+/* Plain pre fallback while Shiki loads (~50ms on first mount). */
+.codeblock-pre-plain {
+  color: var(--ink-soft);
+  background: var(--bg-input);
+  white-space: pre;
+}
+
+/* Shiki-rendered HTML lands inside this wrapper. The library inlines
+ * theme colors on each <span>; we just need to align fonts + scrolling
+ * with the rest of the chat surface. */
+.codeblock-shiki {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.5;
+  overflow-x: auto;
+}
+
+.codeblock-shiki pre.shiki {
+  margin: 0;
+  padding: 12px 14px;
+  background: transparent !important;
+}
+
+.codeblock-shiki code {
+  font-family: inherit;
 }
 
 /* table */

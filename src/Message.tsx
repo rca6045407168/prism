@@ -2,16 +2,24 @@
  * Message renderer with markdown + syntax-highlighted code blocks + copy button.
  *
  * - User messages: rendered as plain text (no markdown — preserves exact input)
- * - Assistant messages: full GFM markdown, code blocks via prism-react-renderer
+ * - Assistant messages: full GFM markdown, code blocks via Shiki (VSCode-grade
+ *   highlighting; same TextMate grammars as VSCode itself, theme-aware via the
+ *   data-theme attribute on <html>).
  * - System messages: plain text, italicized
  *
  * Each assistant message has a "Copy" button that copies the raw markdown.
  * Each code block has its own "Copy" button.
+ *
+ * 2026-05-08: swapped prism-react-renderer → shiki. Reasons:
+ *   - VSCode-grade grammars (Microsoft uses Shiki on vscode.dev)
+ *   - Much wider language coverage (~200 vs ~80)
+ *   - Themes match VSCode 1:1 (vitesse-dark, vitesse-light, github-dark, etc.)
+ * Cost: highlighter loads async (one-time ~50ms). Code blocks render with a
+ * plain <pre> fallback while loading, then upgrade in place.
  */
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Highlight, themes } from "prism-react-renderer";
 import { ChatMessage, ToolEvent } from "./gateway";
 import { Artifact } from "./artifacts";
 
@@ -103,8 +111,70 @@ function isDarkTheme(): boolean {
   return window.matchMedia("(prefers-color-scheme: dark)").matches;
 }
 
+// ── Shiki — module-level lazy singleton ──────────────────────────
+//
+// One highlighter instance is shared across every CodeBlock. We lazy-
+// load on first CodeBlock mount so the ~200KB Shiki bundle isn't on
+// the critical path. While loading, code blocks render as plain <pre>
+// — once loaded they upgrade in place via state update.
+//
+// Languages: a curated list covering 95% of what assistants emit.
+// Adding more is cheap (Shiki loads grammars on demand) but each one
+// adds bundle bytes; the list below is calibrated for typical chat-with-
+// LLM usage (Python, TS/JS, Rust, Go, SQL, Bash, JSON, YAML, MD, diff).
+const SHIKI_LANGS = [
+  "javascript", "typescript", "tsx", "jsx",
+  "python", "rust", "go", "java", "kotlin", "swift",
+  "ruby", "php", "csharp", "cpp", "c",
+  "bash", "sh", "zsh", "fish", "powershell",
+  "sql", "graphql", "yaml", "toml", "json", "jsonc",
+  "html", "css", "scss",
+  "markdown", "diff", "regex",
+  "dockerfile", "nginx", "ini",
+  "lua", "perl", "haskell", "elixir", "erlang", "clojure",
+  "r", "julia", "matlab", "scala", "dart",
+] as const;
+
+const SHIKI_THEMES = ["vitesse-dark", "vitesse-light"] as const;
+
+let shikiHighlighterPromise: Promise<any> | null = null;
+
+function getShikiHighlighter(): Promise<any> {
+  if (shikiHighlighterPromise) return shikiHighlighterPromise;
+  shikiHighlighterPromise = import("shiki").then(({ createHighlighter }) =>
+    createHighlighter({
+      themes: [...SHIKI_THEMES],
+      langs: [...SHIKI_LANGS],
+    }),
+  );
+  return shikiHighlighterPromise;
+}
+
+// Map Markdown language tags to Shiki language ids. Most are direct;
+// a few common aliases need normalization.
+function normalizeShikiLang(lang: string): string {
+  const l = (lang || "").toLowerCase().trim();
+  const aliases: Record<string, string> = {
+    "js": "javascript",
+    "ts": "typescript",
+    "py": "python",
+    "rs": "rust",
+    "rb": "ruby",
+    "yml": "yaml",
+    "md": "markdown",
+    "shell": "bash",
+    "console": "bash",
+  };
+  const mapped = aliases[l] || l;
+  // Fall back to plaintext for unknown/empty so Shiki doesn't throw.
+  return (SHIKI_LANGS as readonly string[]).includes(mapped) ? mapped : "text";
+}
+
 function CodeBlock({ children, language }: { children: string; language: string }) {
   const [copied, setCopied] = useState(false);
+  const [highlightedHtml, setHighlightedHtml] = useState<string | null>(null);
+  const codeRef = useRef<HTMLPreElement>(null);
+
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(children);
@@ -115,7 +185,39 @@ function CodeBlock({ children, language }: { children: string; language: string 
     }
   };
 
-  const theme = isDarkTheme() ? themes.vsDark : themes.github;
+  // Run Shiki on mount + whenever theme/language/content changes.
+  useEffect(() => {
+    let cancelled = false;
+    const theme = isDarkTheme() ? "vitesse-dark" : "vitesse-light";
+    const lang = normalizeShikiLang(language);
+
+    getShikiHighlighter()
+      .then((hl) => {
+        if (cancelled) return;
+        try {
+          // codeToHtml returns a <pre><code>…</code></pre> with inline
+          // styles. Theme-aware: vitesse-dark for dark mode, vitesse-light
+          // otherwise. Same VSCode TextMate grammars Microsoft uses.
+          const html = hl.codeToHtml(children.trimEnd(), {
+            lang,
+            theme,
+          });
+          setHighlightedHtml(html);
+        } catch {
+          // Shiki throws on malformed input or unloaded language — fall
+          // back to plain <pre> rather than crashing the message.
+          setHighlightedHtml(null);
+        }
+      })
+      .catch(() => {
+        // Network failure loading Shiki bundle — keep plain <pre>.
+        setHighlightedHtml(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [children, language]);
 
   return (
     <div className="codeblock">
@@ -125,19 +227,22 @@ function CodeBlock({ children, language }: { children: string; language: string 
           {copied ? "Copied" : "Copy"}
         </button>
       </div>
-      <Highlight code={children.trimEnd()} language={language || "text"} theme={theme}>
-        {({ className, style, tokens, getLineProps, getTokenProps }) => (
-          <pre className={`codeblock-pre ${className}`} style={style}>
-            {tokens.map((line, i) => (
-              <div key={i} {...getLineProps({ line })}>
-                {line.map((token, key) => (
-                  <span key={key} {...getTokenProps({ token })} />
-                ))}
-              </div>
-            ))}
-          </pre>
-        )}
-      </Highlight>
+      {highlightedHtml ? (
+        // Shiki-rendered HTML is sanitized by the library (no <script>);
+        // the syntax tokens are <span> with inline color styles.
+        <div
+          className="codeblock-shiki"
+          // eslint-disable-next-line react/no-danger
+          dangerouslySetInnerHTML={{ __html: highlightedHtml }}
+        />
+      ) : (
+        // Pre-Shiki fallback: plain <pre> while highlighter loads (~50ms
+        // on first mount; instant on subsequent CodeBlocks since the
+        // highlighter is a singleton).
+        <pre ref={codeRef} className="codeblock-pre codeblock-pre-plain">
+          {children.trimEnd()}
+        </pre>
+      )}
     </div>
   );
 }
