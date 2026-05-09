@@ -359,7 +359,16 @@ function send(params: {
   // v0.1.17: inject the auto-profile as a system-prompt prefix when
   // the user has any learned preferences. Empty string means no profile
   // yet → no flag → no overhead.
-  const profileBlock = renderForInjection();
+  //
+  // v0.1.22: pass the user's message into renderForInjection so the
+  // profile is relevance-filtered for THIS turn — load-bearing dimensions
+  // (anti_patterns, communication_style) stay in scope; everything else
+  // is ranked by lexical overlap and trimmed to a 12-line budget.
+  // This is the Prism-shaped echo of LatentRAG's "don't pay for
+  // context that isn't relevant to this query" — we can't joint-train
+  // the LLM+retriever (claude is frozen on Anthropic's side), but we
+  // can stop dumping irrelevant profile entries into every turn.
+  const profileBlock = renderForInjection(params.message);
   if (profileBlock) {
     args.push("--append-system-prompt", profileBlock);
   }

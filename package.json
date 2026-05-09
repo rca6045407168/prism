@@ -1,7 +1,7 @@
 {
   "name": "prism",
-  "version": "0.1.21",
-  "description": "Prism — type N prompts, get N parallel agents, reconciled into one answer.",
+  "version": "0.1.22",
+  "description": "Prism \u2014 type N prompts, get N parallel agents, reconciled into one answer.",
   "author": {
     "name": "Richard Chen",
     "email": "richard.chen@flexhaul.ai"
@@ -22,7 +22,7 @@
   "build": {
     "appId": "ai.prism.agent",
     "productName": "Prism",
-    "copyright": "Copyright © 2026 Richard Chen. Includes open-source components — see Credits.",
+    "copyright": "Copyright \u00a9 2026 Richard Chen. Includes open-source components \u2014 see Credits.",
     "directories": {
       "output": "release",
       "buildResources": "build"

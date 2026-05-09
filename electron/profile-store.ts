@@ -225,39 +225,155 @@ export function dimensionLabel(d: Dimension): string {
 
 /**
  * Render the profile as a compact markdown block suitable for prepending
- * to a chat turn's system prompt. Capped at ~250 tokens by line count +
- * per-line trim. Returns empty string when profile has no entries.
+ * to a chat turn's system prompt. Returns empty string when profile has
+ * no entries.
+ *
+ * Two modes:
+ *
+ *  1. **Static (no `userMessage`)** — dumps the full profile, bounded by
+ *     `MAX_ENTRIES_PER_DIMENSION` per dimension (~250 tokens at the cap).
+ *     Used by callers that don't have the user message in scope or that
+ *     explicitly want everything (legacy behavior).
+ *
+ *  2. **Relevance-filtered (`userMessage` provided)** — keeps load-bearing
+ *     dimensions in full (anti_patterns + communication_style; the user
+ *     told Prism explicit don'ts and tone, so these MUST always be in
+ *     scope) and ranks every other dimension's entries by lexical overlap
+ *     with the message. Hard cap ~12 lines total. The Prism-shaped echo
+ *     of LatentRAG's "don't pay for context that's not relevant to this
+ *     query" — we can't joint-train an LLM+retriever (the model is
+ *     frozen, we wrap claude CLI), but we can stop dumping
+ *     "knowledge: prefers Mandarin" into a turn that's about TypeScript.
  */
-export function renderForInjection(): string {
+const ALWAYS_INCLUDE_DIMENSIONS: Dimension[] = [
+  "anti_patterns",
+  "communication_style",
+];
+
+const RELEVANCE_DIM_ORDER: Dimension[] = [
+  "role_context",
+  "decision_style",
+  "tooling",
+  "project_focus",
+  "naming",
+  "knowledge",
+];
+
+const FULL_DIM_ORDER: Dimension[] = [
+  "anti_patterns",
+  "communication_style",
+  "role_context",
+  "decision_style",
+  "tooling",
+  "project_focus",
+  "naming",
+  "knowledge",
+];
+
+const RELEVANCE_LINE_BUDGET = 12;
+
+/** Lowercase tokenize, drop short noise words. */
+function tokenize(text: string): Set<string> {
+  const out = new Set<string>();
+  for (const raw of text.toLowerCase().split(/\W+/)) {
+    if (raw.length >= 3) out.add(raw);
+  }
+  return out;
+}
+
+/** Cheap lexical relevance: |query ∩ entry| / log(|entry|+2). */
+function relevance(entryText: string, queryTokens: Set<string>): number {
+  if (queryTokens.size === 0) return 0;
+  const entryTokens = tokenize(entryText);
+  if (entryTokens.size === 0) return 0;
+  let overlap = 0;
+  for (const t of queryTokens) if (entryTokens.has(t)) overlap += 1;
+  // Normalize so a 200-char entry doesn't dominate a 50-char one purely
+  // by token-count.
+  return overlap / Math.log(entryTokens.size + 2);
+}
+
+export function renderForInjection(userMessage?: string): string {
   const p = loadProfile();
   if (p.entries.length === 0) return "";
 
-  // Order: by dimension priority (anti_patterns first — they're load-bearing),
-  // then highest-confidence within each dimension.
-  const dimOrder: Dimension[] = [
-    "anti_patterns",
-    "communication_style",
-    "role_context",
-    "decision_style",
-    "tooling",
-    "project_focus",
-    "naming",
-    "knowledge",
-  ];
-
+  const filtered = typeof userMessage === "string" && userMessage.trim().length > 0;
   const lines: string[] = [];
-  for (const d of dimOrder) {
-    const items = p.entries
-      .filter((e) => e.dimension === d)
-      .sort((a, b) => b.confidence - a.confidence)
-      .slice(0, 4);
-    if (items.length === 0) continue;
-    lines.push(`**${dimensionLabel(d)}**`);
-    for (const it of items) {
-      const claim = it.claim.length > 140 ? it.claim.slice(0, 137) + "…" : it.claim;
-      lines.push(`- ${claim}`);
+
+  if (!filtered) {
+    // Static mode — keep legacy behavior.
+    for (const d of FULL_DIM_ORDER) {
+      const items = p.entries
+        .filter((e) => e.dimension === d)
+        .sort((a, b) => b.confidence - a.confidence)
+        .slice(0, 4);
+      if (items.length === 0) continue;
+      lines.push(`**${dimensionLabel(d)}**`);
+      for (const it of items) {
+        const claim = it.claim.length > 140 ? it.claim.slice(0, 137) + "…" : it.claim;
+        lines.push(`- ${claim}`);
+      }
+    }
+  } else {
+    const queryTokens = tokenize(userMessage as string);
+
+    // Always-on dimensions: top-3 by confidence, no relevance filtering.
+    for (const d of ALWAYS_INCLUDE_DIMENSIONS) {
+      const items = p.entries
+        .filter((e) => e.dimension === d)
+        .sort((a, b) => b.confidence - a.confidence)
+        .slice(0, 3);
+      if (items.length === 0) continue;
+      lines.push(`**${dimensionLabel(d)}**`);
+      for (const it of items) {
+        const claim = it.claim.length > 140 ? it.claim.slice(0, 137) + "…" : it.claim;
+        lines.push(`- ${claim}`);
+      }
+    }
+
+    // Relevance-filtered dimensions: rank globally across remaining
+    // entries by (relevance, confidence), keep only those with
+    // non-zero relevance, fit within the remaining line budget.
+    const remaining = RELEVANCE_LINE_BUDGET - lines.length;
+    if (remaining > 0) {
+      type Scored = { entry: ProfileEntry; score: number };
+      const candidates: Scored[] = p.entries
+        .filter((e) => RELEVANCE_DIM_ORDER.includes(e.dimension))
+        .map((entry) => ({
+          entry,
+          score: relevance(entry.claim + " " + (entry.evidence ?? ""), queryTokens),
+        }))
+        .filter((c) => c.score > 0)
+        .sort(
+          (a, b) =>
+            b.score - a.score ||
+            b.entry.confidence - a.entry.confidence ||
+            b.entry.added_at.localeCompare(a.entry.added_at),
+        );
+
+      // Group surviving candidates back by dimension to render under
+      // headers, preserving the ranking inside each group.
+      const byDim = new Map<Dimension, ProfileEntry[]>();
+      let kept = 0;
+      for (const { entry } of candidates) {
+        if (kept >= remaining) break;
+        const list = byDim.get(entry.dimension) ?? [];
+        list.push(entry);
+        byDim.set(entry.dimension, list);
+        kept += 1;
+      }
+      for (const d of RELEVANCE_DIM_ORDER) {
+        const items = byDim.get(d);
+        if (!items || items.length === 0) continue;
+        lines.push(`**${dimensionLabel(d)}**`);
+        for (const it of items) {
+          const claim = it.claim.length > 140 ? it.claim.slice(0, 137) + "…" : it.claim;
+          lines.push(`- ${claim}`);
+        }
+      }
     }
   }
+
   if (lines.length === 0) return "";
 
   return [
