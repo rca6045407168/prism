@@ -2899,3 +2899,267 @@ html, body, #root {
   gap: 18px;
   position: relative; /* needed for the drop-active overlay */
 }
+
+/* ── v0.1.27 — composer button hierarchy + light mode rebuild ──── */
+
+/* The generic `.composer button` rule was filling EVERY button with
+ * the ink/send style. That made the attach button look like a giant
+ * black square next to a tiny BATCH chip and the Send button. Reset
+ * the cascade and define each button explicitly. */
+
+.composer button {
+  /* Reset the inherited heavy default; specific button classes set
+   * their own appearance below. */
+  background: transparent;
+  color: var(--ink-soft);
+  border: 1px solid transparent;
+  height: 44px;
+  padding: 0 12px;
+  border-radius: var(--radius-md);
+  font-weight: 500;
+  font-size: 13px;
+  box-shadow: none;
+  transition: background 100ms ease, color 100ms ease, border-color 100ms ease, transform 80ms ease;
+}
+
+.composer button:hover:not(:disabled) {
+  background: var(--bg-input);
+  color: var(--ink);
+  border-color: var(--border);
+  opacity: 1;
+}
+
+.composer button:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+/* Attach button — square icon, ghost style, blends with the composer */
+.composer-attach {
+  width: 40px !important;
+  padding: 0 !important;
+  font-size: 15px !important;
+  color: var(--ink-mute) !important;
+  background: transparent !important;
+  border: 1px solid var(--border) !important;
+}
+
+.composer-attach:hover:not(:disabled) {
+  background: var(--bg-input) !important;
+  color: var(--ink) !important;
+  border-color: var(--border-strong) !important;
+}
+
+.composer-attach:disabled {
+  opacity: 0.35;
+}
+
+/* BATCH toggle — pill chip, monospace */
+.composer .batch-toggle {
+  background: transparent !important;
+  color: var(--ink-mute) !important;
+  border: 1px solid var(--border) !important;
+  font-family: var(--mono) !important;
+  font-size: 10.5px !important;
+  letter-spacing: 0.08em !important;
+  font-weight: 600 !important;
+  padding: 0 14px !important;
+  height: 40px !important;
+}
+
+.composer .batch-toggle:hover:not(:disabled) {
+  background: var(--bg-input) !important;
+  color: var(--ink) !important;
+  border-color: var(--border-strong) !important;
+}
+
+.composer .batch-toggle.active {
+  background: var(--bg-card) !important;
+  color: var(--ink) !important;
+  border-color: var(--border-strong) !important;
+  /* spectrum tint via subtle box-shadow rather than border-image
+   * (Safari/Chromium-mac handles it more reliably) */
+  box-shadow: 0 0 0 1px transparent, 0 1px 0 rgba(255, 94, 91, 0.18),
+    0 1px 0 rgba(155, 93, 229, 0.18);
+}
+
+/* Send button — the filled primary action. The ONLY full-color CTA. */
+.composer-send {
+  background: var(--ink) !important;
+  color: var(--bg) !important;
+  border: 1px solid var(--ink) !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.01em !important;
+  padding: 0 22px !important;
+  min-width: 84px;
+  height: 40px !important;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.05), 0 2px 8px rgba(0, 0, 0, 0.06) !important;
+}
+
+.composer-send:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--ink) 88%, var(--ink-mute)) !important;
+  border-color: color-mix(in srgb, var(--ink) 88%, var(--ink-mute)) !important;
+  color: var(--bg) !important;
+}
+
+.composer-send:disabled {
+  background: var(--bg-input) !important;
+  color: var(--ink-mute) !important;
+  border-color: var(--border) !important;
+  box-shadow: none !important;
+  opacity: 0.7;
+}
+
+/* Stop button — danger color, takes Send's slot when streaming */
+.composer .composer-stop {
+  background: #c0392b !important;
+  color: #fff !important;
+  border-color: #c0392b !important;
+  font-weight: 600 !important;
+  padding: 0 18px !important;
+  height: 40px !important;
+}
+
+.composer .composer-stop:hover {
+  background: #a83524 !important;
+  border-color: #a83524 !important;
+  color: #fff !important;
+}
+
+/* ── Composer hint — single line, ellipses if it doesn't fit ───── */
+
+.composer-hint {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 0 4px 8px;
+  font-size: 10.5px;
+  color: var(--ink-mute);
+  letter-spacing: 0.02em;
+}
+
+.composer-hint > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+/* ── Composer container — slightly tighter, better separation ── */
+
+.composer {
+  padding: 10px 16px 14px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  background: var(--bg);
+}
+
+.composer-row {
+  align-items: stretch;
+}
+
+.composer-actions {
+  align-items: center;
+}
+
+.composer textarea {
+  min-height: 44px;
+  padding: 11px 16px;
+  font-size: 14px;
+}
+
+/* ── Empty state — compact, less wasted vertical space ─────────── */
+
+.empty-state {
+  padding: 24px 40px 60px;
+  gap: 10px;
+  justify-content: center;
+}
+
+.empty-state .prism-mark {
+  width: 60px;
+  height: 60px;
+}
+
+.empty-state h2 {
+  font-size: 22px;
+  margin-top: 2px;
+}
+
+.empty-state .tagline {
+  font-size: 13.5px;
+  max-width: 340px;
+  line-height: 1.5;
+}
+
+.empty-state .hint {
+  font-size: 10px;
+  margin-top: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px 10px;
+  max-width: 360px;
+}
+
+.empty-state .hint kbd {
+  padding: 1px 5px;
+  font-size: 9.5px;
+}
+
+/* ── Light mode chromatic warmth + stronger separation ──────── */
+
+:root {
+  /* Slightly warmer paper, more contrast on the card */
+  --bg: #f8f6f0;
+  --bg-card: #ffffff;
+  --bg-input: #f0eee6;
+  --border: #e3dfd2;
+  --border-strong: #b5b09a;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    /* keep dark unchanged */
+    --bg: #0c0c0e;
+    --bg-card: #161618;
+    --bg-input: #1d1d20;
+    --border: #2a2a2e;
+    --border-strong: #3a3a40;
+  }
+}
+
+/* Stronger visual separation between sidebar / chat / composer */
+.sidebar {
+  background: color-mix(in srgb, var(--bg) 92%, var(--ink) 0%);
+  border-right: 1px solid var(--border);
+}
+
+@media (prefers-color-scheme: light) {
+  .sidebar {
+    background: color-mix(in srgb, var(--bg-card) 60%, var(--bg) 40%);
+  }
+}
+
+.titlebar {
+  background: color-mix(in srgb, var(--bg) 70%, transparent);
+  border-bottom: 1px solid var(--border);
+}
+
+.titlebar::after {
+  /* slightly more present spectrum bar */
+  opacity: 0.5;
+  height: 1.5px;
+}
+
+/* User bubble — should still pop in light mode */
+.msg.user {
+  background: #1a1a1c;
+  color: #fafaf6;
+}
+
+@media (prefers-color-scheme: dark) {
+  .msg.user {
+    background: var(--ink);
+    color: var(--bg);
+  }
+}

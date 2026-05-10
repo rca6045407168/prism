@@ -932,8 +932,8 @@ export function App() {
           <div className="composer-hint">
             <span>
               {batchMode
-                ? "Batch · one prompt per line · ⌘+Enter to send"
-                : "Enter to send · Shift+Enter for new line · ⌘B to batch"}
+                ? "Batch · one prompt per line · ⌘⏎ to send"
+                : "⏎ send · ⇧⏎ newline · ⌘B batch"}
             </span>
             <span style={{ display: "flex", alignItems: "center", gap: 12 }}>
               {input.length > 0 ? (
@@ -1067,6 +1067,7 @@ export function App() {
                 </button>
               ) : (
                 <button
+                  className="composer-send"
                   onClick={send}
                   disabled={
                     !claudeReady ||
