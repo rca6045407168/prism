@@ -407,6 +407,56 @@ tier to claude. Heuristic, not a pre-flight LLM call:
 Logs `[auto-route] {turnId, tier, messageLen, preview}` to electron-log
 so the chosen tier is auditable.
 
+### Account / OAuth — `electron/oauth.ts` + `electron/account-store.ts`
+
+Sign-in flow via OAuth 2.0 with PKCE and loopback redirect. The user
+clicks "Sign in with Google" in `Settings → Account`; Prism opens the
+provider's auth URL in the user's default browser, spins up a one-shot
+HTTP server on a random localhost port to receive the redirect, and
+exchanges the code for an access token using PKCE (no `client_secret`
+is shipped or used — security comes from PKCE + redirect_uri validation,
+which is the correct profile for a native app).
+
+Persistence: only the public identity (`email`, `name`, `picture`,
+`signedInAt`) is written to `<userData>/account.json`. The access token
+is dropped after the one `/userinfo` fetch. If Prism ever needs to call
+the provider again, the user signs in again.
+
+Configuration:
+
+```
+# Option A: env var
+export PRISM_GOOGLE_OAUTH_CLIENT_ID=<your-client-id>.apps.googleusercontent.com
+
+# Option B: config file
+echo '{ "google": { "clientId": "<your-client-id>.apps.googleusercontent.com" } }' \
+  > "~/Library/Application Support/Prism/oauth-config.json"
+```
+
+The client ID is for a Google Cloud OAuth 2.0 client of type
+"Desktop app" — that flavor accepts PKCE and `http://127.0.0.1:PORT/callback`
+redirects without secret. Until either source resolves, the Account tab
+shows a setup card with the exact config snippet.
+
+**Why this exists in v0.1.24**: Prism today is free + local-only and
+doesn't gate anything. The Stripe license wire on the V0.2 backlog needs
+an identity to check entitlement against; v0.1.24 ships the identity
+half now so license-check is a one-edit drop later. **No accounts on a
+Prism backend** — there is no Prism backend. Identity is verified by the
+OAuth provider, persisted locally, and checked locally against whatever
+license source we eventually wire.
+
+Files:
+- `electron/oauth.ts` — PKCE flow, loopback server, code → token →
+  userinfo. Provider matrix is extensible; Google is the only one
+  wired today.
+- `electron/account-store.ts` — JSON read/write at
+  `<userData>/account.json`. Tiny.
+- `electron/main.ts` — IPC handlers: `prism:account:status`,
+  `prism:account:signIn`, `prism:account:signOut`.
+- `src/Settings.tsx` — Account tab (4th, after General / Memory / Speed)
+  with sign-in button or signed-in card.
+
 ### Setup wizard — `electron/setup.ts` + `src/SetupWizard.tsx`
 
 First-launch detection of:

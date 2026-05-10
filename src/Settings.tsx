@@ -87,12 +87,17 @@ type Props = {
 
 export function SettingsModal({ open, onClose, onChange, current }: Props) {
   const [draft, setDraft] = useState<Settings>(current);
-  const [tab, setTab] = useState<"general" | "memory" | "speed">("general");
+  const [tab, setTab] = useState<"general" | "memory" | "speed" | "account">(
+    "general",
+  );
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [confirmingClear, setConfirmingClear] = useState(false);
   const [rtkStatus, setRtkStatus] = useState<RtkStatus | null>(null);
   const [enablingHook, setEnablingHook] = useState(false);
   const [hookFlash, setHookFlash] = useState<string | null>(null);
+  const [accountStatus, setAccountStatus] = useState<AccountStatus | null>(null);
+  const [signingIn, setSigningIn] = useState(false);
+  const [signInError, setSignInError] = useState<string | null>(null);
 
   useEffect(() => {
     setDraft(current);
@@ -110,6 +115,35 @@ export function SettingsModal({ open, onClose, onChange, current }: Props) {
     if (tab !== "speed") return;
     window.flexhaul.rtk.status().then(setRtkStatus).catch(() => {});
   }, [open, tab]);
+
+  // Load account state on first open + refresh when Account tab is selected.
+  useEffect(() => {
+    if (!open) return;
+    window.flexhaul.account.status().then(setAccountStatus).catch(() => {});
+  }, [open, tab]);
+
+  const onSignIn = async (provider: "google") => {
+    setSigningIn(true);
+    setSignInError(null);
+    try {
+      const res = await window.flexhaul.account.signIn(provider);
+      if (res.ok) {
+        const next = await window.flexhaul.account.status();
+        setAccountStatus(next);
+      } else {
+        setSignInError(res.error);
+      }
+    } finally {
+      setSigningIn(false);
+    }
+  };
+
+  const onSignOut = async () => {
+    await window.flexhaul.account.signOut();
+    const next = await window.flexhaul.account.status();
+    setAccountStatus(next);
+    setSignInError(null);
+  };
 
   const onEnableHook = async () => {
     setEnablingHook(true);
@@ -196,6 +230,15 @@ export function SettingsModal({ open, onClose, onChange, current }: Props) {
               <span className="settings-tab-count">
                 {formatTokens(rtkStatus.stats.totalSavedTokens)}
               </span>
+            ) : null}
+          </button>
+          <button
+            className={`settings-tab ${tab === "account" ? "active" : ""}`}
+            onClick={() => setTab("account")}
+          >
+            Account
+            {accountStatus?.account ? (
+              <span className="settings-tab-dot" aria-label="signed in" />
             ) : null}
           </button>
         </div>
@@ -480,6 +523,104 @@ export function SettingsModal({ open, onClose, onChange, current }: Props) {
                       Stats from <code>rtk gain</code> — global across every
                       Claude session on this machine.
                     </div>
+                  </div>
+                ) : null}
+              </>
+            )}
+          </div>
+        ) : null}
+
+        {tab === "account" ? (
+          <div className="settings-body">
+            <div className="settings-memory-intro">
+              <p>
+                Sign in to associate Prism with your identity. Used for
+                upcoming licensing — does not sync your chats, profile,
+                or settings to any server.
+              </p>
+              <p className="settings-hint">
+                The OAuth handshake goes to the provider you pick. Your
+                email, name, and avatar URL stay on this device at{" "}
+                <code>~/Library/Application&nbsp;Support/Prism/account.json</code>.
+                We never store the access token.
+              </p>
+            </div>
+
+            {accountStatus === null ? (
+              <div className="settings-memory-empty">Loading…</div>
+            ) : accountStatus.account ? (
+              <div className="settings-account-card">
+                {accountStatus.account.picture ? (
+                  <img
+                    className="settings-account-avatar"
+                    src={accountStatus.account.picture}
+                    alt={accountStatus.account.name}
+                    referrerPolicy="no-referrer"
+                  />
+                ) : (
+                  <div className="settings-account-avatar settings-account-avatar-placeholder">
+                    {accountStatus.account.name.charAt(0).toUpperCase()}
+                  </div>
+                )}
+                <div className="settings-account-meta">
+                  <div className="settings-account-name">
+                    {accountStatus.account.name}
+                  </div>
+                  <div className="settings-account-email">
+                    {accountStatus.account.email}
+                  </div>
+                  <div className="settings-account-provider">
+                    via {accountStatus.account.provider} · since{" "}
+                    {new Date(
+                      accountStatus.account.signedInAt,
+                    ).toLocaleDateString()}
+                  </div>
+                </div>
+                <button
+                  className="settings-secondary"
+                  onClick={onSignOut}
+                >
+                  Sign out
+                </button>
+              </div>
+            ) : (
+              <>
+                <div className="settings-account-providers">
+                  {accountStatus.providers.google.configured ? (
+                    <button
+                      className="settings-account-signin"
+                      onClick={() => onSignIn("google")}
+                      disabled={signingIn}
+                    >
+                      <span className="settings-account-signin-icon" aria-hidden="true">
+                        G
+                      </span>
+                      <span>
+                        {signingIn ? "Opening browser…" : "Sign in with Google"}
+                      </span>
+                    </button>
+                  ) : (
+                    <div className="settings-account-unconfigured">
+                      <div className="settings-account-unconfigured-title">
+                        Google OAuth not configured
+                      </div>
+                      <div className="settings-account-unconfigured-body">
+                        Set the env var{" "}
+                        <code>PRISM_GOOGLE_OAUTH_CLIENT_ID</code> before
+                        launching Prism, or write the client id into{" "}
+                        <code>~/Library/Application&nbsp;Support/Prism/oauth-config.json</code>
+                        :
+                        <pre className="settings-account-snippet">{`{ "google": { "clientId": "YOUR_CLIENT_ID.apps.googleusercontent.com" } }`}</pre>
+                        Then quit + relaunch Prism. The client ID is for
+                        a Google Cloud OAuth 2.0 "Desktop app" client —
+                        PKCE flow, no client secret needed.
+                      </div>
+                    </div>
+                  )}
+                </div>
+                {signInError ? (
+                  <div className="settings-account-error">
+                    Sign-in failed: {signInError}
                   </div>
                 ) : null}
               </>

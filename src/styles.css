@@ -2201,3 +2201,158 @@ html[data-theme="dark"] {
 .chat::-webkit-scrollbar-thumb:hover {
   background: var(--border-strong);
 }
+
+/* ── Account tab (v0.1.24) ───────────────────────────────────── */
+
+.settings-tab-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #4ac29a;
+  margin-left: 6px;
+  box-shadow: 0 0 4px rgba(74, 194, 154, 0.5);
+}
+
+.settings-account-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.settings-account-avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+}
+
+.settings-account-avatar-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+.settings-account-meta {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-account-name {
+  font-size: 14px;
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.settings-account-email {
+  font-size: 12px;
+  color: var(--ink-soft);
+  margin-top: 2px;
+}
+
+.settings-account-provider {
+  font-size: 11px;
+  font-family: var(--mono);
+  color: var(--ink-mute);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-top: 4px;
+}
+
+.settings-account-providers {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.settings-account-signin {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  background: var(--bg-card);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  align-self: flex-start;
+}
+
+.settings-account-signin:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-input);
+}
+
+.settings-account-signin:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.settings-account-signin-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #4285F4 0%, #EA4335 100%);
+  color: #fff;
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.settings-account-unconfigured {
+  padding: 14px;
+  background: var(--bg-input);
+  border: 1px dashed var(--border-strong);
+  border-radius: 8px;
+}
+
+.settings-account-unconfigured-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink);
+  margin-bottom: 6px;
+}
+
+.settings-account-unconfigured-body {
+  font-size: 12px;
+  color: var(--ink-soft);
+  line-height: 1.55;
+}
+
+.settings-account-snippet {
+  margin: 8px 0;
+  padding: 8px 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-soft);
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.settings-account-error {
+  margin-top: 12px;
+  padding: 8px 12px;
+  background: rgba(192, 57, 43, 0.08);
+  border: 1px solid rgba(192, 57, 43, 0.32);
+  color: #c0392b;
+  border-radius: 6px;
+  font-size: 12px;
+}

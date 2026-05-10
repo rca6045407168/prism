@@ -42,6 +42,22 @@ type DiscoveredCommand = {
   filePath: string;
 };
 
+type Account = {
+  version: 1;
+  provider: "google";
+  email: string;
+  name: string;
+  picture?: string;
+  signedInAt: string;
+};
+
+type AccountStatus = {
+  account: Account | null;
+  providers: {
+    google: { configured: boolean };
+  };
+};
+
 type RtkStatus = {
   installed: boolean;
   hookEnabled: boolean;
@@ -155,6 +171,13 @@ declare global {
           backupPath?: string;
           error?: string;
         }>;
+      };
+      account: {
+        status: () => Promise<AccountStatus>;
+        signIn: (
+          provider: "google",
+        ) => Promise<{ ok: true; account: Account } | { ok: false; error: string }>;
+        signOut: () => Promise<{ ok: boolean }>;
       };
     };
   }

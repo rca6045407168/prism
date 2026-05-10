@@ -73,6 +73,15 @@ contextBridge.exposeInMainWorld("flexhaul", {
     enableHook: () => ipcRenderer.invoke("prism:rtk:enableHook"),
   },
 
+  // Account / OAuth (v0.1.24) — local-only identity for the upcoming
+  // license-check flow. PKCE OAuth via browser; no client_secret.
+  account: {
+    status: () => ipcRenderer.invoke("prism:account:status"),
+    signIn: (provider: "google") =>
+      ipcRenderer.invoke("prism:account:signIn", provider),
+    signOut: () => ipcRenderer.invoke("prism:account:signOut"),
+  },
+
   // Auto-profile (v0.1.17) — local-only, silent learning of user
   // preferences for a more personalized chat over time.
   profile: {

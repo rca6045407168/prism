@@ -43,6 +43,7 @@ downloads + restarts — no reinstall.
 - **Token saver** — RTK integration; Settings → Speed tab
 - **Batch mode** (⌘B) — multi-prompt fan-out via the `batch-orchestrator` skill
 - **Adversarial debate** — `/debate` runs 2-round critic/proposer/judge before shipping high-stakes drafts. See [docs/ARCHITECTURE.md § Adversarial debate](docs/ARCHITECTURE.md#adversarial-debate--prismskillsdebatemd).
+- **OAuth sign-in** — Settings → Account. Browser-redirect PKCE flow with Google; identity (`email`, `name`, `picture`) stored locally at `<userData>/account.json`. No Prism backend; scaffolding for the v0.2 Stripe license check.
 
 ## Develop
 

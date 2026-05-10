@@ -28,6 +28,13 @@ import {
 } from "./profile-store";
 import { listCommands, refreshCommandsCache } from "./commands";
 import { getStatus as getRtkStatus, enableHook as enableRtkHook } from "./rtk";
+import { signIn as oauthSignIn, isProviderConfigured } from "./oauth";
+import {
+  loadAccount,
+  saveAccount,
+  clear as clearAccount,
+  type Account,
+} from "./account-store";
 
 // ---------- logging ----------
 log.transports.file.level = "info";
@@ -137,6 +144,39 @@ ipcMain.handle("prism:commands:refresh", () => {
 // ---------- RTK token saver (v0.1.19) ----------
 ipcMain.handle("prism:rtk:status", () => getRtkStatus());
 ipcMain.handle("prism:rtk:enableHook", () => enableRtkHook());
+
+// ---------- Account / OAuth (v0.1.24) ----------
+ipcMain.handle("prism:account:status", () => {
+  const account = loadAccount();
+  return {
+    account,
+    providers: {
+      google: { configured: isProviderConfigured("google") },
+    },
+  };
+});
+ipcMain.handle("prism:account:signIn", async (_e, provider: "google") => {
+  try {
+    const result = await oauthSignIn(provider);
+    const account: Account = {
+      version: 1,
+      provider: result.provider,
+      email: result.email,
+      name: result.name,
+      picture: result.picture,
+      signedInAt: result.signedInAt,
+    };
+    saveAccount(account);
+    return { ok: true, account };
+  } catch (e: any) {
+    log.warn("[account] sign-in failed", e?.message ?? e);
+    return { ok: false, error: e?.message ?? String(e) };
+  }
+});
+ipcMain.handle("prism:account:signOut", () => {
+  clearAccount();
+  return { ok: true };
+});
 ipcMain.handle("flexhaul:checkForUpdates", async () => {
   try {
     const result = await autoUpdater.checkForUpdates();
