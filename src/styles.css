@@ -1,3 +1,8 @@
+/* Inter is a much better UI font than the system default — load it
+ * as a variable-axis file from Google Fonts CDN with display:swap
+ * so the system font is used until Inter is ready. (v0.1.26) */
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap");
+
 :root {
   --bg: #fafaf6;
   --bg-card: #ffffff;
@@ -2483,4 +2488,414 @@ html[data-theme="dark"] {
 .composer-attach:disabled {
   opacity: 0.4;
   cursor: default;
+}
+
+/* ── v0.1.26 polish pass ─────────────────────────────────────── */
+
+:root {
+  --sans: "Inter", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --shadow-soft: 0 1px 0 rgba(0, 0, 0, 0.02), 0 2px 6px rgba(0, 0, 0, 0.03);
+  --shadow-card: 0 1px 0 rgba(0, 0, 0, 0.04), 0 4px 16px rgba(0, 0, 0, 0.05);
+  --shadow-focus: 0 0 0 3px rgba(77, 150, 255, 0.16);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --shadow-soft: 0 1px 0 rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.18);
+    --shadow-card: 0 1px 0 rgba(0, 0, 0, 0.5), 0 8px 24px rgba(0, 0, 0, 0.24);
+    --shadow-focus: 0 0 0 3px rgba(77, 150, 255, 0.24);
+  }
+}
+
+/* Tighter, more breathable typography across the board. */
+html, body, #root {
+  font-feature-settings: "ss01", "cv11", "ss02"; /* Inter's nicer letter forms */
+}
+
+/* ── Titlebar — cohesive single-line nav, not a row of disjoint chips ── */
+
+.titlebar {
+  height: 42px;
+  padding-left: 16px;
+  padding-right: 12px;
+  gap: 8px;
+  backdrop-filter: blur(20px);
+  background: color-mix(in srgb, var(--bg) 78%, transparent);
+}
+
+.app:not(.app-with-sidebar) .titlebar {
+  padding-left: 84px;
+}
+
+.titlebar::after {
+  height: 1px;
+  opacity: 0.35;
+}
+
+.brand {
+  font-size: 13px;
+  letter-spacing: 0.02em;
+}
+
+.brand-version {
+  font-size: 10.5px;
+  opacity: 0.65;
+}
+
+.titlebar-button {
+  height: 26px;
+  padding: 0 10px;
+  font-size: 12px;
+  font-family: var(--sans);
+  color: var(--ink-soft);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  margin-left: 0;
+  transition: background 100ms ease, color 100ms ease, border-color 100ms ease;
+  font-weight: 500;
+}
+
+.titlebar-button:hover {
+  background: var(--bg-input);
+  color: var(--ink);
+  border-color: transparent;
+}
+
+.titlebar-button.active {
+  background: var(--bg-input);
+  color: var(--ink);
+  border-color: var(--border);
+}
+
+/* ── Sidebar refinements ─────────────────────────────────────── */
+
+.sidebar {
+  border-right-color: color-mix(in srgb, var(--border) 70%, transparent);
+}
+
+.sidebar-item {
+  padding: 9px 11px;
+  border-radius: var(--radius-sm);
+  transition: background 80ms ease, transform 80ms ease;
+}
+
+.sidebar-item:active {
+  transform: scale(0.99);
+}
+
+.sidebar-item.active {
+  background: var(--bg-input);
+  outline: none;
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+
+.sidebar-item-title {
+  font-size: 12.5px;
+  font-weight: 500;
+  letter-spacing: 0.005em;
+}
+
+.sidebar-item-meta {
+  font-size: 9.5px;
+  opacity: 0.7;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* ── Message bubbles — clearer rhythm + softer cards ─────────── */
+
+.msg {
+  padding: 13px 18px;
+  border-radius: var(--radius-lg);
+  line-height: 1.6;
+  font-size: 14.5px;
+}
+
+.msg.user {
+  background: var(--ink);
+  color: var(--bg);
+  border-bottom-right-radius: 6px;
+  font-weight: 500;
+  letter-spacing: 0.002em;
+}
+
+.msg.assistant {
+  background: var(--bg-card);
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  border-bottom-left-radius: 6px;
+  box-shadow: var(--shadow-soft);
+  padding: 15px 20px;
+}
+
+.msg.assistant.streaming {
+  border-color: color-mix(in srgb, #4d96ff 30%, var(--border));
+}
+
+.msg.system {
+  font-size: 11.5px;
+  border-radius: 999px;
+  border-color: color-mix(in srgb, var(--border-strong) 50%, transparent);
+  padding: 6px 14px;
+  background: color-mix(in srgb, var(--bg-card) 60%, transparent);
+}
+
+.msg .label {
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  font-weight: 600;
+  margin-bottom: 7px;
+}
+
+/* ── Code blocks ─────────────────────────────────────────────── */
+
+.codeblock {
+  border-radius: var(--radius-md);
+  border-color: color-mix(in srgb, var(--border) 80%, transparent);
+  box-shadow: var(--shadow-soft);
+  overflow: hidden;
+}
+
+.codeblock-header {
+  padding: 7px 14px;
+  border-bottom-color: color-mix(in srgb, var(--border) 60%, transparent);
+  background: color-mix(in srgb, var(--bg-card) 85%, var(--bg));
+}
+
+.codeblock-lang {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+
+.codeblock-copy {
+  padding: 3px 10px;
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+}
+
+/* Inline code — finer pill */
+.inline-code {
+  font-family: var(--mono);
+  font-size: 0.9em;
+  padding: 1.5px 6px;
+  border-radius: 4px;
+  background: var(--bg-input);
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+}
+
+/* ── Composer — soft, more responsive ────────────────────────── */
+
+.composer {
+  padding: 12px 16px 16px;
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--bg) 0%, transparent) 0%,
+    var(--bg) 30%
+  );
+}
+
+.composer-hint {
+  padding-bottom: 8px;
+  font-size: 11px;
+  letter-spacing: 0.01em;
+  opacity: 0.85;
+}
+
+.composer textarea {
+  border-radius: var(--radius-md);
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.55;
+  padding: 13px 16px;
+  background: var(--bg-card);
+  border-color: color-mix(in srgb, var(--border) 90%, transparent);
+  box-shadow: var(--shadow-soft);
+  transition: border-color 120ms ease, box-shadow 150ms ease, background 120ms ease;
+}
+
+.composer textarea:focus {
+  border-color: color-mix(in srgb, #4d96ff 50%, var(--border-strong));
+  box-shadow: var(--shadow-focus);
+  background: var(--bg-card);
+}
+
+.composer button {
+  height: 46px;
+  border-radius: var(--radius-md);
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: 0.01em;
+  box-shadow: var(--shadow-soft);
+  transition: background 120ms ease, opacity 100ms ease, transform 100ms ease;
+}
+
+.composer button:hover:not(:disabled) {
+  opacity: 1;
+  background: color-mix(in srgb, var(--ink) 88%, var(--ink-soft));
+}
+
+.composer button:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.composer-stop {
+  background: #c0392b !important;
+  color: #fff !important;
+}
+
+.batch-toggle {
+  background: var(--bg-card) !important;
+  color: var(--ink-soft) !important;
+  border: 1px solid var(--border) !important;
+  font-family: var(--mono) !important;
+  font-size: 10.5px !important;
+  letter-spacing: 0.08em !important;
+  font-weight: 600 !important;
+  padding: 0 12px !important;
+}
+
+.batch-toggle.active {
+  border-image: var(--spectrum) 1 !important;
+  color: var(--ink) !important;
+}
+
+/* ── Empty state — friendlier, less stark ────────────────────── */
+
+.empty-state {
+  gap: 14px;
+}
+
+.empty-state h2 {
+  font-size: 28px;
+  letter-spacing: -0.025em;
+}
+
+.empty-state .tagline {
+  font-size: 14.5px;
+  line-height: 1.55;
+  max-width: 380px;
+  color: var(--ink-soft);
+}
+
+.empty-state .hint {
+  margin-top: 12px;
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+}
+
+.empty-state .hint kbd {
+  font-size: 10px;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg-card);
+  font-family: var(--mono);
+  margin: 0 1px;
+}
+
+/* ── Scrollbars — narrow, themed, only on hover ──────────────── */
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--ink-mute) 35%, transparent) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--ink-mute) 20%, transparent);
+  border-radius: 4px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+*:hover > ::-webkit-scrollbar-thumb,
+::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--ink-mute) 40%, transparent);
+  background-clip: padding-box;
+}
+
+/* ── Settings modal — softer chrome ─────────────────────────── */
+
+.settings-card {
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card), 0 0 0 1px var(--border);
+  border: none;
+}
+
+.settings-header h2 {
+  letter-spacing: -0.01em;
+  font-weight: 600;
+}
+
+.settings-tab {
+  font-weight: 500;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+}
+
+.settings-tab.active {
+  border-bottom-color: var(--ink);
+}
+
+.settings-primary {
+  border-radius: var(--radius-md);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.settings-secondary {
+  border-radius: var(--radius-md);
+}
+
+/* ── Tool strip — subtler ─────────────────────────────────────── */
+
+.tools {
+  border-radius: var(--radius-md);
+  border-color: color-mix(in srgb, var(--border) 70%, transparent);
+}
+
+.tools-summary {
+  padding: 8px 12px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+
+/* ── Artifact chip & pane ─────────────────────────────────────── */
+
+.artifact-chip {
+  border-radius: var(--radius-sm);
+  font-weight: 500;
+  box-shadow: var(--shadow-soft);
+}
+
+.artifact-pane {
+  border-left-color: color-mix(in srgb, var(--border) 80%, transparent);
+  box-shadow: -4px 0 16px rgba(0, 0, 0, 0.04);
+}
+
+@media (prefers-color-scheme: dark) {
+  .artifact-pane {
+    box-shadow: -4px 0 24px rgba(0, 0, 0, 0.3);
+  }
+}
+
+/* ── Chat region — slightly tighter, more breathing room ─────── */
+
+.chat {
+  padding: 24px 28px 16px;
+  gap: 18px;
+  position: relative; /* needed for the drop-active overlay */
 }

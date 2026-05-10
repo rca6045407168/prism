@@ -1,6 +1,6 @@
 {
   "name": "prism",
-  "version": "0.1.25",
+  "version": "0.1.26",
   "description": "Prism \u2014 type N prompts, get N parallel agents, reconciled into one answer.",
   "author": {
     "name": "Richard Chen",
@@ -22,6 +22,7 @@
   "build": {
     "appId": "ai.prism.agent",
     "productName": "Prism",
+    "afterPack": "./build/after-pack.js",
     "copyright": "Copyright \u00a9 2026 Richard Chen. Includes open-source components \u2014 see Credits.",
     "directories": {
       "output": "release",
