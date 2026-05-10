@@ -179,6 +179,21 @@ declare global {
         ) => Promise<{ ok: true; account: Account } | { ok: false; error: string }>;
         signOut: () => Promise<{ ok: boolean }>;
       };
+      window: {
+        setAlwaysOnTop: (pinned: boolean) => Promise<{ ok: boolean; pinned: boolean }>;
+        isAlwaysOnTop: () => Promise<{ pinned: boolean }>;
+        isFocused: () => Promise<{ focused: boolean }>;
+      };
+      files: {
+        save: (args: {
+          chatId: string;
+          fileName: string;
+          dataBase64: string;
+        }) => Promise<
+          | { ok: true; path: string; sizeBytes: number }
+          | { ok: false; error: string }
+        >;
+      };
     };
   }
 }

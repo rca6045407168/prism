@@ -9,6 +9,7 @@ type Props = {
   onNewChat: () => void;
   onRename: (id: string, title: string) => void;
   onDelete: (id: string) => void;
+  onExport?: (id: string) => void;
   onToggle: () => void;
   searchQuery: string;
   onSearchChange: (q: string) => void;
@@ -22,6 +23,7 @@ export function Sidebar({
   onNewChat,
   onRename,
   onDelete,
+  onExport,
   onToggle,
   searchQuery,
   onSearchChange,
@@ -122,6 +124,18 @@ export function Sidebar({
               >
                 ✎
               </button>
+              {onExport ? (
+                <button
+                  className="sidebar-action"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onExport(chat.id);
+                  }}
+                  title="Export chat as markdown"
+                >
+                  ↓
+                </button>
+              ) : null}
               <button
                 className="sidebar-action sidebar-action-danger"
                 onClick={(e) => {

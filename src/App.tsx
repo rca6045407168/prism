@@ -14,6 +14,14 @@ import {
 } from "./SlashCommandMenu";
 import { ArtifactPane } from "./ArtifactPane";
 import { Artifact, extractArtifacts } from "./artifacts";
+import { downloadChatAsMarkdown } from "./export-chat";
+import {
+  AttachedFile,
+  MAX_ATTACHMENTS_PER_TURN,
+  saveAttachment,
+  buildMessageWithAttachments,
+  humanBytes,
+} from "./attachments";
 import {
   Chat,
   listChats,
@@ -121,6 +129,12 @@ export function App() {
   // Active artifact preview (v0.1.18)
   const [activeArtifact, setActiveArtifact] = useState<Artifact | null>(null);
 
+  // Window pin + file attachments (v0.1.25)
+  const [pinned, setPinned] = useState(false);
+  const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
+  const [dropOverlay, setDropOverlay] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   // Multi-chat state (v0.1.5)
   const [chats, setChats] = useState<Chat[]>(() => {
     migrateLegacyChat();
@@ -153,6 +167,76 @@ export function App() {
     if (settings.theme === "system") root.removeAttribute("data-theme");
     else root.setAttribute("data-theme", settings.theme);
   }, [settings.theme]);
+
+  // Read current pin state on boot (in case the user already pinned
+  // before quitting last session — main.ts could remember + restore,
+  // but for now this just reads the current Electron state).
+  useEffect(() => {
+    window.flexhaul.window
+      .isAlwaysOnTop()
+      .then(({ pinned }) => setPinned(!!pinned))
+      .catch(() => {});
+  }, []);
+
+  // Pin / unpin the window. Always-on-top is per-Electron-window, not
+  // per-screen.
+  const togglePinned = useCallback(async () => {
+    const next = !pinned;
+    await window.flexhaul.window.setAlwaysOnTop(next);
+    setPinned(next);
+  }, [pinned]);
+
+  // Export the active chat as markdown via browser download.
+  const handleExportChat = useCallback(
+    (id: string) => {
+      const chat = chats.find((c) => c.id === id);
+      if (chat) downloadChatAsMarkdown(chat);
+    },
+    [chats],
+  );
+
+  // Handle a batch of dropped/picked files. Saves each via IPC, then
+  // appends to attachedFiles. Capped at MAX_ATTACHMENTS_PER_TURN.
+  const handleFiles = useCallback(
+    async (files: FileList | File[]) => {
+      if (!activeId) return;
+      const arr = Array.from(files);
+      const remaining = MAX_ATTACHMENTS_PER_TURN - attachedFiles.length;
+      if (remaining <= 0) {
+        setError(`Max ${MAX_ATTACHMENTS_PER_TURN} attachments per turn`);
+        return;
+      }
+      const toSave = arr.slice(0, remaining);
+      const saved: AttachedFile[] = [];
+      for (const f of toSave) {
+        const att = await saveAttachment(activeId, f);
+        if (att) saved.push(att);
+      }
+      if (saved.length > 0) {
+        setAttachedFiles((prev) => [...prev, ...saved]);
+      }
+      if (saved.length < toSave.length) {
+        setError(
+          `Skipped ${toSave.length - saved.length} file(s) — too large or save failed`,
+        );
+      }
+    },
+    [activeId, attachedFiles.length],
+  );
+
+  const removeAttachment = useCallback((id: string) => {
+    setAttachedFiles((prev) => {
+      const dropped = prev.find((a) => a.id === id);
+      if (dropped?.previewUrl) {
+        try {
+          URL.revokeObjectURL(dropped.previewUrl);
+        } catch {
+          /* ignore */
+        }
+      }
+      return prev.filter((a) => a.id !== id);
+    });
+  }, []);
 
   // Load slash commands once at startup; refresh on focus to pick up
   // newly-added skills without restarting the app.
@@ -360,6 +444,32 @@ export function App() {
           return prev;
         });
       }
+      // v0.1.25: surface a Mac notification if user has switched away from
+      // Prism mid-turn. Click → focus the window. We don't notify when
+      // the user is still looking at Prism — that'd be obnoxious.
+      try {
+        if (
+          ev.finalText &&
+          typeof Notification !== "undefined" &&
+          Notification.permission === "granted" &&
+          document.visibilityState !== "visible"
+        ) {
+          const preview =
+            ev.finalText.replace(/\s+/g, " ").slice(0, 140) +
+            (ev.finalText.length > 140 ? "…" : "");
+          const n = new Notification("Prism — reply ready", { body: preview });
+          n.onclick = () => {
+            try {
+              window.focus();
+              n.close();
+            } catch {
+              /* ignore */
+            }
+          };
+        }
+      } catch {
+        /* ignore */
+      }
     });
 
     const offError = window.flexhaul.chat.onError((ev) => {
@@ -515,10 +625,29 @@ export function App() {
   }, [handleNewChat]);
 
   const send = useCallback(async () => {
-    if (!claudeReady || !input.trim() || sending || streaming) return;
+    const hasInput = input.trim().length > 0;
+    const hasAttachments = attachedFiles.length > 0;
+    if (!claudeReady || (!hasInput && !hasAttachments) || sending || streaming) return;
     const text = input.trim();
+    const filesAtSend = attachedFiles; // snapshot before clearing
     setInput("");
+    setAttachedFiles([]);
     setSending(true);
+
+    // v0.1.25: request OS notification permission lazily on first send.
+    // The actual notification is fired in the onEnd handler when the
+    // window is unfocused. Default state → ask once; granted/denied
+    // → no-op. We don't block on the user's answer.
+    try {
+      if (
+        typeof Notification !== "undefined" &&
+        Notification.permission === "default"
+      ) {
+        Notification.requestPermission().catch(() => {});
+      }
+    } catch {
+      /* ignore */
+    }
 
     let toSend: string;
     let userBubble: ChatMessage;
@@ -534,8 +663,14 @@ export function App() {
       toSend = `/batch\n${prompts.join("\n")}`;
       userBubble = { role: "user", text, batch: true, batchCount: prompts.length };
     } else {
-      toSend = text;
-      userBubble = { role: "user", text };
+      toSend = buildMessageWithAttachments(text, filesAtSend);
+      const displayText =
+        filesAtSend.length > 0
+          ? `${text}\n\n[+${filesAtSend.length} attachment${filesAtSend.length === 1 ? "" : "s"}: ${filesAtSend
+              .map((f) => f.name)
+              .join(", ")}]`
+          : text;
+      userBubble = { role: "user", text: displayText };
     }
     updateActiveMessages((prev) => [...prev, userBubble]);
 
@@ -557,6 +692,7 @@ export function App() {
   }, [
     claudeReady,
     input,
+    attachedFiles,
     batchMode,
     sending,
     streaming,
@@ -642,6 +778,7 @@ export function App() {
         onNewChat={handleNewChat}
         onRename={handleRenameChat}
         onDelete={handleDeleteChat}
+        onExport={handleExportChat}
         onToggle={() => setSidebarCollapsed((v) => !v)}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
@@ -652,6 +789,13 @@ export function App() {
           <span className="brand">PRISM</span>
           <span className="brand-version">v{version}</span>
           <span style={{ flex: 1 }} />
+          <button
+            className={`titlebar-button${pinned ? " active" : ""}`}
+            onClick={togglePinned}
+            title={pinned ? "Unpin window (currently always-on-top)" : "Pin window (always-on-top)"}
+          >
+            {pinned ? "📌" : "📍"}
+          </button>
           <button
             className="titlebar-button"
             onClick={() => {
@@ -691,7 +835,34 @@ export function App() {
 
         {error && <div className="error-banner">{error}</div>}
 
-        <div className="chat" ref={chatRef}>
+        <div
+          className={`chat${dropOverlay ? " drop-active" : ""}`}
+          ref={chatRef}
+          onDragEnter={(e) => {
+            // Show overlay only when actual files are being dragged.
+            if (e.dataTransfer?.types?.includes("Files")) {
+              e.preventDefault();
+              setDropOverlay(true);
+            }
+          }}
+          onDragOver={(e) => {
+            if (e.dataTransfer?.types?.includes("Files")) {
+              e.preventDefault();
+            }
+          }}
+          onDragLeave={(e) => {
+            // Only clear if we're leaving the chat container, not just
+            // crossing between its children.
+            if (e.currentTarget === e.target) setDropOverlay(false);
+          }}
+          onDrop={(e) => {
+            if (e.dataTransfer?.files?.length) {
+              e.preventDefault();
+              setDropOverlay(false);
+              void handleFiles(e.dataTransfer.files);
+            }
+          }}
+        >
           {messages.length === 0 && !error && (
             <div className="empty-state">
               <div className="prism-mark" />
@@ -801,6 +972,54 @@ export function App() {
               </a>
             </span>
           </div>
+          {attachedFiles.length > 0 ? (
+            <div className="composer-attachments">
+              {attachedFiles.map((f) => (
+                <div key={f.id} className="composer-attachment">
+                  {f.previewUrl ? (
+                    <img
+                      className="composer-attachment-thumb"
+                      src={f.previewUrl}
+                      alt={f.name}
+                    />
+                  ) : (
+                    <div className="composer-attachment-icon">
+                      {f.mimeType.startsWith("text/")
+                        ? "📄"
+                        : f.mimeType === "application/pdf"
+                        ? "📕"
+                        : "📎"}
+                    </div>
+                  )}
+                  <div className="composer-attachment-meta">
+                    <div className="composer-attachment-name">{f.name}</div>
+                    <div className="composer-attachment-size">
+                      {humanBytes(f.sizeBytes)}
+                    </div>
+                  </div>
+                  <button
+                    className="composer-attachment-remove"
+                    onClick={() => removeAttachment(f.id)}
+                    title="Remove attachment"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : null}
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            style={{ display: "none" }}
+            onChange={(e) => {
+              if (e.target.files?.length) {
+                void handleFiles(e.target.files);
+                e.target.value = ""; // allow re-selecting the same file
+              }
+            }}
+          />
           <div className="composer-row">
             <textarea
               ref={composerRef}
@@ -820,6 +1039,18 @@ export function App() {
             />
             <div className="composer-actions">
               <button
+                className="composer-attach"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={attachedFiles.length >= MAX_ATTACHMENTS_PER_TURN}
+                title={
+                  attachedFiles.length >= MAX_ATTACHMENTS_PER_TURN
+                    ? `Max ${MAX_ATTACHMENTS_PER_TURN} attachments`
+                    : "Attach file or image (drag-drop also works)"
+                }
+              >
+                📎
+              </button>
+              <button
                 className={`batch-toggle ${batchMode ? "active" : ""}`}
                 onClick={() => setBatchMode((v) => !v)}
                 title="Toggle batch mode (⌘B)"
@@ -835,7 +1066,14 @@ export function App() {
                   ■ Stop
                 </button>
               ) : (
-                <button onClick={send} disabled={!claudeReady || !input.trim() || sending}>
+                <button
+                  onClick={send}
+                  disabled={
+                    !claudeReady ||
+                    (!input.trim() && attachedFiles.length === 0) ||
+                    sending
+                  }
+                >
                   {sending ? "…" : "Send"}
                 </button>
               )}

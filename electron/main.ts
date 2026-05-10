@@ -145,6 +145,54 @@ ipcMain.handle("prism:commands:refresh", () => {
 ipcMain.handle("prism:rtk:status", () => getRtkStatus());
 ipcMain.handle("prism:rtk:enableHook", () => enableRtkHook());
 
+// ---------- Window controls (v0.1.25) ----------
+ipcMain.handle("prism:window:setAlwaysOnTop", (_e, pinned: boolean) => {
+  if (mainWindow) mainWindow.setAlwaysOnTop(!!pinned, "floating");
+  return { ok: true, pinned: !!pinned };
+});
+ipcMain.handle("prism:window:isAlwaysOnTop", () => {
+  return { pinned: mainWindow?.isAlwaysOnTop() ?? false };
+});
+ipcMain.handle("prism:window:isFocused", () => {
+  return { focused: mainWindow?.isFocused() ?? false };
+});
+
+// ---------- File uploads (v0.1.25) ----------
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10MB hard cap
+ipcMain.handle(
+  "prism:files:save",
+  (
+    _e,
+    args: {
+      chatId: string;
+      fileName: string;
+      dataBase64: string;
+    },
+  ): { ok: true; path: string; sizeBytes: number } | { ok: false; error: string } => {
+    try {
+      const buf = Buffer.from(args.dataBase64, "base64");
+      if (buf.byteLength > MAX_UPLOAD_BYTES) {
+        return {
+          ok: false,
+          error: `File too large: ${Math.round(buf.byteLength / 1024 / 1024)}MB > 10MB cap`,
+        };
+      }
+      const safeChatId = args.chatId.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64);
+      const safeName = args.fileName
+        .replace(/[^a-zA-Z0-9._-]/g, "_")
+        .slice(-100); // keep extension at the tail
+      const dir = path.join(app.getPath("userData"), "uploads", safeChatId);
+      fs.mkdirSync(dir, { recursive: true });
+      const dest = path.join(dir, `${Date.now()}-${safeName}`);
+      fs.writeFileSync(dest, buf);
+      return { ok: true, path: dest, sizeBytes: buf.byteLength };
+    } catch (e: any) {
+      log.warn("[files] save failed", e?.message ?? e);
+      return { ok: false, error: e?.message ?? String(e) };
+    }
+  },
+);
+
 // ---------- Account / OAuth (v0.1.24) ----------
 ipcMain.handle("prism:account:status", () => {
   const account = loadAccount();

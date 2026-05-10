@@ -82,6 +82,18 @@ contextBridge.exposeInMainWorld("flexhaul", {
     signOut: () => ipcRenderer.invoke("prism:account:signOut"),
   },
 
+  // Window controls + file uploads (v0.1.25)
+  window: {
+    setAlwaysOnTop: (pinned: boolean) =>
+      ipcRenderer.invoke("prism:window:setAlwaysOnTop", pinned),
+    isAlwaysOnTop: () => ipcRenderer.invoke("prism:window:isAlwaysOnTop"),
+    isFocused: () => ipcRenderer.invoke("prism:window:isFocused"),
+  },
+  files: {
+    save: (args: { chatId: string; fileName: string; dataBase64: string }) =>
+      ipcRenderer.invoke("prism:files:save", args),
+  },
+
   // Auto-profile (v0.1.17) — local-only, silent learning of user
   // preferences for a more personalized chat over time.
   profile: {
