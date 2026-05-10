@@ -300,12 +300,12 @@ function processLine(turn: Turn, line: string): void {
   }
 }
 
-function send(params: {
+async function send(params: {
   message: string;
   model?: string;
   sessionId?: string | null;
   window: BrowserWindow;
-}): { turnId: string } | { error: string } {
+}): Promise<{ turnId: string } | { error: string }> {
   const claudeBin = findClaudeBin();
   if (!claudeBin) {
     return {
@@ -368,7 +368,12 @@ function send(params: {
   // context that isn't relevant to this query" — we can't joint-train
   // the LLM+retriever (claude is frozen on Anthropic's side), but we
   // can stop dumping irrelevant profile entries into every turn.
-  const profileBlock = renderForInjection(params.message);
+  // v0.1.23: renderForInjection is now async so it can race the user-
+  // message embedding against a 200ms timeout. Worst case (cold-start
+  // model load) it falls back to lexical scoring — same path as
+  // v0.1.22. Profile injection is the only thing that's awaited; the
+  // rest of the spawn flow stays sync.
+  const profileBlock = await renderForInjection(params.message);
   if (profileBlock) {
     args.push("--append-system-prompt", profileBlock);
   }

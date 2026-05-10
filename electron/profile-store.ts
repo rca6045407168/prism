@@ -34,6 +34,12 @@ export type ProfileEntry = {
   evidence?: string;        // short quote from user, optional
   source_turn?: string;     // turnId that created this entry
   added_at: string;         // ISO
+  /** L2-normalized 384-dim MiniLM embedding of `claim + " " + evidence`.
+   *  Computed in background by `embedUnembedded()` after the entry lands;
+   *  used by `renderForInjection()` for semantic relevance ranking. Absent
+   *  means "not yet computed" or "embed failed" — callers fall back to
+   *  lexical scoring. v0.1.23. */
+  embedding?: number[];
 };
 
 export type Profile = {
@@ -281,19 +287,99 @@ function tokenize(text: string): Set<string> {
   return out;
 }
 
-/** Cheap lexical relevance: |query ∩ entry| / log(|entry|+2). */
-function relevance(entryText: string, queryTokens: Set<string>): number {
+/** Cheap lexical relevance: |query ∩ entry| / log(|entry|+2).
+ *  Used as fallback when embeddings aren't ready or embedding fails. */
+function lexicalRelevance(entryText: string, queryTokens: Set<string>): number {
   if (queryTokens.size === 0) return 0;
   const entryTokens = tokenize(entryText);
   if (entryTokens.size === 0) return 0;
   let overlap = 0;
   for (const t of queryTokens) if (entryTokens.has(t)) overlap += 1;
-  // Normalize so a 200-char entry doesn't dominate a 50-char one purely
-  // by token-count.
   return overlap / Math.log(entryTokens.size + 2);
 }
 
-export function renderForInjection(userMessage?: string): string {
+/** Cosine over L2-normalized 384-dim MiniLM embeddings == dot product. */
+function cosine(a: number[], b: number[]): number {
+  const n = Math.min(a.length, b.length);
+  if (n === 0) return 0;
+  let s = 0;
+  for (let i = 0; i < n; i++) s += a[i] * b[i];
+  return s;
+}
+
+/** Text we embed for each entry — claim plus optional evidence. */
+function entryEmbedText(e: ProfileEntry): string {
+  return e.evidence ? `${e.claim} ${e.evidence}` : e.claim;
+}
+
+/**
+ * Background embed-on-update. Walks the profile, embeds any entry
+ * that doesn't have an `embedding` yet, persists. Fire-and-forget
+ * from the caller's POV — never blocks chat. If the model fails to
+ * load (offline first run), the entries just stay unembedded and
+ * `renderForInjection()` falls back to lexical scoring.
+ *
+ * Called from `profile-extractor.ts` after every applyUpdates(), and
+ * once at app boot to backfill entries created before v0.1.23.
+ */
+export async function embedUnembedded(): Promise<{ embedded: number }> {
+  const profile = loadProfile();
+  const pending = profile.entries.filter(
+    (e) => !Array.isArray(e.embedding) || e.embedding.length === 0,
+  );
+  if (pending.length === 0) return { embedded: 0 };
+
+  // Lazy-import embed.ts so this module stays loadable even when the
+  // transformers package can't initialize (e.g. headless smoke tests).
+  let embed: (text: string) => Promise<number[]>;
+  try {
+    ({ embed } = require("./embed"));
+  } catch (e) {
+    log.info("[profile] embed module unavailable; skipping background embed");
+    return { embedded: 0 };
+  }
+
+  let embedded = 0;
+  for (const e of pending) {
+    try {
+      const v = await embed(entryEmbedText(e));
+      if (v && v.length > 0) {
+        e.embedding = v;
+        embedded += 1;
+      }
+    } catch (err) {
+      // First-call download failure or any embed error — stop the batch
+      // and try again next applyUpdates(). Don't loop on errors.
+      log.warn("[profile] embed failed mid-batch", String(err).slice(0, 200));
+      break;
+    }
+  }
+  if (embedded > 0) saveProfile(profile);
+  return { embedded };
+}
+
+/** How many entries have a usable embedding right now. Used by the
+ *  renderer's relevance path to decide whether to ask for an embedding
+ *  query or fall straight to lexical. */
+function embeddingCoverage(profile: Profile): {
+  total: number;
+  embedded: number;
+} {
+  let embedded = 0;
+  for (const e of profile.entries) {
+    if (Array.isArray(e.embedding) && e.embedding.length > 0) embedded += 1;
+  }
+  return { total: profile.entries.length, embedded };
+}
+
+/** Timeout budget (ms) for embedding the user message inline on a chat
+ *  turn. After this, we ship the lexical-filtered profile and keep the
+ *  chat path snappy. Warm calls are ~30-80ms on M-series so 200ms gives
+ *  3-5x headroom; cold-start (first ever turn) usually exceeds this and
+ *  silently uses lexical, which is correct. */
+const EMBED_QUERY_TIMEOUT_MS = 200;
+
+export async function renderForInjection(userMessage?: string): Promise<string> {
   const p = loadProfile();
   if (p.entries.length === 0) return "";
 
@@ -331,25 +417,81 @@ export function renderForInjection(userMessage?: string): string {
       }
     }
 
-    // Relevance-filtered dimensions: rank globally across remaining
-    // entries by (relevance, confidence), keep only those with
-    // non-zero relevance, fit within the remaining line budget.
+    // Relevance-filtered dimensions: rank by (embedding cosine if
+    // available, else lexical), keep only those with non-zero score,
+    // fit within the remaining line budget.
     const remaining = RELEVANCE_LINE_BUDGET - lines.length;
     if (remaining > 0) {
+      // Try the embedding path. Conditions for it to fire:
+      //   (a) Every relevance-pool entry has a cached embedding
+      //   (b) We can embed the user message within the timeout budget
+      // If either fails, fall back to lexical. Failures stay silent —
+      // the embedder logs its own warnings.
+      const relevancePool = p.entries.filter((e) =>
+        RELEVANCE_DIM_ORDER.includes(e.dimension),
+      );
+      const allEmbedded =
+        relevancePool.length > 0 &&
+        relevancePool.every(
+          (e) => Array.isArray(e.embedding) && e.embedding!.length > 0,
+        );
+
+      let queryVec: number[] | null = null;
+      if (allEmbedded) {
+        try {
+          const embedMod = require("./embed");
+          queryVec = await embedMod.embedWithTimeout(
+            userMessage as string,
+            EMBED_QUERY_TIMEOUT_MS,
+          );
+        } catch {
+          queryVec = null;
+        }
+      }
+
+      const scoringMode: "embedding" | "lexical" =
+        queryVec && allEmbedded ? "embedding" : "lexical";
+
       type Scored = { entry: ProfileEntry; score: number };
-      const candidates: Scored[] = p.entries
-        .filter((e) => RELEVANCE_DIM_ORDER.includes(e.dimension))
-        .map((entry) => ({
-          entry,
-          score: relevance(entry.claim + " " + (entry.evidence ?? ""), queryTokens),
-        }))
-        .filter((c) => c.score > 0)
+      const candidates: Scored[] = relevancePool
+        .map((entry) => {
+          let score = 0;
+          if (scoringMode === "embedding" && queryVec) {
+            score = cosine(queryVec, entry.embedding!);
+          } else {
+            score = lexicalRelevance(
+              entry.claim + " " + (entry.evidence ?? ""),
+              queryTokens,
+            );
+          }
+          return { entry, score };
+        })
+        // Threshold: cosine > 0.18 catches genuinely-related items
+        // (the MiniLM L6-v2 baseline for "unrelated" is around 0.05-
+        // 0.15). For lexical, > 0 is the right bar.
+        .filter((c) =>
+          scoringMode === "embedding" ? c.score > 0.18 : c.score > 0,
+        )
         .sort(
           (a, b) =>
             b.score - a.score ||
             b.entry.confidence - a.entry.confidence ||
             b.entry.added_at.localeCompare(a.entry.added_at),
         );
+
+      try {
+        log.info(
+          "[profile-render]",
+          JSON.stringify({
+            mode: scoringMode,
+            pool: relevancePool.length,
+            kept: Math.min(candidates.length, remaining),
+            topScore: candidates[0]?.score ?? 0,
+          }),
+        );
+      } catch {
+        /* logging is best-effort */
+      }
 
       // Group surviving candidates back by dimension to render under
       // headers, preserving the ranking inside each group.

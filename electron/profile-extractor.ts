@@ -18,6 +18,7 @@ import log from "electron-log";
 import {
   applyUpdates,
   bumpTurnsSeen,
+  embedUnembedded,
   loadProfile,
   type Dimension,
 } from "./profile-store";
@@ -199,6 +200,15 @@ async function doExtract(job: Job): Promise<void> {
   const { added, total } = applyUpdates(stamped);
   bumpTurnsSeen();
   log.info("[extractor]", JSON.stringify({ turnId: job.turnId, added, total }));
+
+  // v0.1.23: schedule semantic-embedding compute for any unembedded
+  // entries (the ones we just added, plus any pre-v0.1.23 backfill).
+  // Fire-and-forget — embed failures are silent and the render path
+  // falls back to lexical scoring. Stays out of the chat-turn critical
+  // path because doExtract() is itself already fire-and-forget.
+  embedUnembedded().catch(() => {
+    /* never blocks; lexical path is fine */
+  });
 }
 
 const VALID_DIMENSIONS = new Set<Dimension>([

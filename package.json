@@ -1,6 +1,6 @@
 {
   "name": "prism",
-  "version": "0.1.22",
+  "version": "0.1.23",
   "description": "Prism \u2014 type N prompts, get N parallel agents, reconciled into one answer.",
   "author": {
     "name": "Richard Chen",
@@ -84,6 +84,7 @@
     ]
   },
   "dependencies": {
+    "@xenova/transformers": "^2.17.2",
     "electron-log": "^5.2.4",
     "electron-updater": "^6.3.9",
     "gpt-tokenizer": "^3.4.0",
