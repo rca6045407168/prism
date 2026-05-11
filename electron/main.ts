@@ -347,10 +347,34 @@ app.whenReady().then(() => {
   registerSetup(() => mainWindow);
   registerClaudeClient(() => mainWindow);
 
-  // Kick off update check 5s after launch (non-blocking)
+  // Kick off update check 5s after launch (non-blocking)…
   setTimeout(() => {
     autoUpdater.checkForUpdatesAndNotify().catch((e) => log.warn("update check failed", e));
   }, 5000);
+
+  // …then re-check every 30 minutes for the lifetime of the app
+  // (v0.1.28 fix). Before this, a user who kept Prism open all day
+  // would only see updates that were released BEFORE they launched.
+  // 30 min is the standard cadence used by Slack / Discord / VSCode.
+  // Each call is cheap (HEAD request to GitHub Releases feed) and
+  // electron-updater dedupes when nothing changed.
+  setInterval(
+    () => {
+      autoUpdater
+        .checkForUpdatesAndNotify()
+        .catch((e) => log.warn("periodic update check failed", e));
+    },
+    30 * 60 * 1000,
+  );
+
+  // Also re-check when the window gains focus (user just came back
+  // to the app). Cheap, instant, fixes the "I have it open in
+  // a background tab" case.
+  app.on("browser-window-focus", () => {
+    autoUpdater
+      .checkForUpdatesAndNotify()
+      .catch((e) => log.warn("focus update check failed", e));
+  });
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
