@@ -115,8 +115,14 @@ function friendlyToolName(raw: string): { provider: string | null; action: strin
   return { provider: provider || null, action: action || "tool" };
 }
 
-function ToolStrip({ tools }: { tools: ToolEvent[] }) {
-  const [expanded, setExpanded] = useState(false);
+function ToolStrip({
+  tools,
+  defaultExpanded = false,
+}: {
+  tools: ToolEvent[];
+  defaultExpanded?: boolean;
+}) {
+  const [expanded, setExpanded] = useState(defaultExpanded);
   if (tools.length === 0) return null;
 
   const running = tools.filter((t) => t.status === "running").length;
@@ -320,6 +326,11 @@ type Props = {
   artifacts?: Artifact[];
   onOpenArtifact?: (a: Artifact) => void;
   activeArtifactId?: string | null;
+  /** v0.1.32: density controls tool-strip + metadata visibility.
+   *  - verbose: tool strip expanded, all tool detail shown
+   *  - normal:  tool strip collapsed (default)
+   *  - summary: tool strip hidden entirely, just the final text */
+  density?: "verbose" | "normal" | "summary";
 };
 
 export function Message({
@@ -330,6 +341,7 @@ export function Message({
   artifacts = [],
   onOpenArtifact,
   activeArtifactId,
+  density = "normal",
 }: Props) {
   const [copiedAll, setCopiedAll] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -418,8 +430,8 @@ export function Message({
       <button className="msg-copy" onClick={copyAll} title="Copy message">
         {copiedAll ? "Copied" : "Copy"}
       </button>
-      {message.tools && message.tools.length > 0 ? (
-        <ToolStrip tools={message.tools} />
+      {message.tools && message.tools.length > 0 && density !== "summary" ? (
+        <ToolStrip tools={message.tools} defaultExpanded={density === "verbose"} />
       ) : null}
       {message.batchAgents && message.batchAgents.length > 0 ? (
         <BatchSection message={message} />

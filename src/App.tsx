@@ -14,6 +14,7 @@ import {
 } from "./SlashCommandMenu";
 import { ArtifactPane } from "./ArtifactPane";
 import { ProjectManager } from "./ProjectManager";
+import { CommandPalette, buildCommandItems } from "./CommandPalette";
 import {
   Paperclip,
   Mic,
@@ -23,6 +24,7 @@ import {
   Settings as SettingsIcon,
   Plus,
   PanelLeft,
+  X as XIcon,
 } from "lucide-react";
 import { Artifact, extractArtifacts } from "./artifacts";
 import { downloadChatAsMarkdown } from "./export-chat";
@@ -164,6 +166,15 @@ export function App() {
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const [voiceRecording, setVoiceRecording] = useState(false);
   const voiceRecRef = useRef<any>(null);
+
+  // Command palette + Side Chat (v0.1.32)
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [sideChatOpen, setSideChatOpen] = useState(false);
+  const [sideChatMessages, setSideChatMessages] = useState<ChatMessage[]>([]);
+  const [sideChatInput, setSideChatInput] = useState("");
+  const [sideChatStreaming, setSideChatStreaming] = useState(false);
+  const sideTurnIdRef = useRef<string | null>(null);
+  const sideChatRef = useRef<HTMLDivElement>(null);
 
   // Multi-chat state (v0.1.5)
   const [chats, setChats] = useState<Chat[]>(() => {
@@ -322,6 +333,35 @@ export function App() {
     },
     [],
   );
+
+  // ── Side Chat (v0.1.32) ──────────────────────────────────
+  const sendSideChat = useCallback(async () => {
+    const text = sideChatInput.trim();
+    if (!text || sideChatStreaming) return;
+    setSideChatInput("");
+    setSideChatStreaming(true);
+    setSideChatMessages((prev) => [...prev, { role: "user", text }]);
+
+    // Side chat is always a fresh session — no project instructions,
+    // no claudeSessionId. Its purpose is a scratchpad disconnected
+    // from the main thread's history.
+    const result = await window.flexhaul.chat.send({
+      message: text,
+      model: settings.model,
+      sessionId: null,
+      projectInstructions: null,
+    });
+    if ("error" in result) {
+      setSideChatMessages((prev) => [
+        ...prev,
+        { role: "system", text: `Error: ${result.error}` },
+      ]);
+      setSideChatStreaming(false);
+    } else {
+      // Tag this turn so onStart/Delta/End route to side state.
+      sideTurnIdRef.current = result.turnId;
+    }
+  }, [sideChatInput, sideChatStreaming, settings.model]);
 
   // ── Voice input (v0.1.29) ────────────────────────────────
   // Browser Web Speech API. On macOS this routes through Apple's
@@ -559,7 +599,14 @@ export function App() {
 
   // Subscribe to chat IPC events — append/mutate the current chat's messages
   useEffect(() => {
+    const isSideTurn = (turnId: string) => sideTurnIdRef.current === turnId;
+
     const offStart = window.flexhaul.chat.onStart((ev) => {
+      if (isSideTurn(ev.turnId)) {
+        // Side chat turn — append empty assistant bubble to its own state
+        setSideChatMessages((prev) => [...prev, { role: "assistant", text: "" }]);
+        return;
+      }
       // Stash session id back to the active chat so future turns can --resume
       setChats((prev) =>
         prev.map((c) =>
@@ -574,6 +621,18 @@ export function App() {
     });
 
     const offDelta = window.flexhaul.chat.onDelta((ev) => {
+      if (isSideTurn(ev.turnId)) {
+        setSideChatMessages((prev) => {
+          if (prev.length === 0) return prev;
+          const next = [...prev];
+          const last = next[next.length - 1];
+          if (last.role === "assistant") {
+            next[next.length - 1] = { ...last, text: last.text + ev.text };
+          }
+          return next;
+        });
+        return;
+      }
       updateActiveMessages((prev) => {
         if (prev.length === 0) return prev;
         const next = [...prev];
@@ -586,6 +645,23 @@ export function App() {
     });
 
     const offEnd = window.flexhaul.chat.onEnd((ev) => {
+      if (isSideTurn(ev.turnId)) {
+        sideTurnIdRef.current = null;
+        setSideChatStreaming(false);
+        if (ev.finalText) {
+          setSideChatMessages((prev) => {
+            if (prev.length === 0) return prev;
+            const last = prev[prev.length - 1];
+            if (last.role === "assistant" && last.text === "") {
+              const next = [...prev];
+              next[next.length - 1] = { ...last, text: ev.finalText };
+              return next;
+            }
+            return prev;
+          });
+        }
+        return;
+      }
       setStreaming(false);
       setActiveTurnId(null);
       // Persist the session id for --resume on next turn (in case onStart
@@ -639,6 +715,15 @@ export function App() {
     });
 
     const offError = window.flexhaul.chat.onError((ev) => {
+      if (isSideTurn(ev.turnId)) {
+        sideTurnIdRef.current = null;
+        setSideChatStreaming(false);
+        setSideChatMessages((prev) => [
+          ...prev,
+          { role: "system", text: `Error: ${ev.error}` },
+        ]);
+        return;
+      }
       setStreaming(false);
       setActiveTurnId(null);
       // v0.1.15: when the runtime reports a session-expired error,
@@ -883,10 +968,28 @@ export function App() {
         e.preventDefault();
         setSidebarCollapsed((v) => !v);
       }
+      // v0.1.32: Command palette
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setPaletteOpen((v) => !v);
+      }
+      // v0.1.32: Side Chat
+      if ((e.metaKey || e.ctrlKey) && e.key === ";") {
+        e.preventDefault();
+        setSideChatOpen((v) => !v);
+      }
+      // Close side chat with Esc when it's the active surface
+      if (e.key === "Escape" && sideChatOpen && !paletteOpen) {
+        const target = e.target as HTMLElement | null;
+        if (sideChatRef.current?.contains(target)) {
+          e.preventDefault();
+          setSideChatOpen(false);
+        }
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [handleNewChat]);
+  }, [handleNewChat, sideChatOpen, paletteOpen]);
 
   const send = useCallback(async () => {
     const hasInput = input.trim().length > 0;
@@ -1147,6 +1250,98 @@ export function App() {
           onDelete={handleDeleteProject}
         />
 
+        <CommandPalette
+          open={paletteOpen}
+          onClose={() => setPaletteOpen(false)}
+          items={buildCommandItems({
+            chats,
+            projects,
+            skills: commands,
+            activeProjectId,
+            pinned,
+            density: settings.density ?? "normal",
+            actions: {
+              newChat: handleNewChat,
+              openProjectManager: () => setProjectManagerOpen(true),
+              selectProject: handleSelectProject,
+              selectChat: handleSelectChat,
+              openSettings: (_tab) => setSettingsOpen(true),
+              togglePinned,
+              toggleVoice,
+              openSideChat: () => setSideChatOpen(true),
+              setDensity: (d) => {
+                const next = { ...settings, density: d };
+                setSettings(next);
+                saveSettings(next);
+              },
+              exportActiveChat: () => {
+                if (activeChat) downloadChatAsMarkdown(activeChat);
+              },
+              runSkill: (name) => {
+                setInput((curr) => (curr ? `${curr} /${name}` : `/${name} `));
+                composerRef.current?.focus();
+              },
+            },
+          })}
+        />
+
+        {sideChatOpen ? (
+          <aside className="side-chat" ref={sideChatRef}>
+            <div className="side-chat-head">
+              <span className="side-chat-label">Side Chat</span>
+              <span className="side-chat-hint">
+                temporary · ⌘; or Esc to close
+              </span>
+              <button
+                className="side-chat-close"
+                onClick={() => setSideChatOpen(false)}
+                title="Close (⌘;)"
+              >
+                <XIcon size={13} strokeWidth={2.2} />
+              </button>
+            </div>
+            <div className="side-chat-body">
+              {sideChatMessages.length === 0 ? (
+                <div className="side-chat-empty">
+                  Scratch any question here. Doesn't touch the main
+                  thread. Closes anytime.
+                </div>
+              ) : (
+                sideChatMessages.map((m, i) => (
+                  <div
+                    key={i}
+                    className={`side-chat-msg side-chat-msg-${m.role}`}
+                  >
+                    {m.text || (sideChatStreaming && i === sideChatMessages.length - 1
+                      ? "…"
+                      : "")}
+                  </div>
+                ))
+              )}
+            </div>
+            <div className="side-chat-composer">
+              <textarea
+                value={sideChatInput}
+                onChange={(e) => setSideChatInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    void sendSideChat();
+                  }
+                }}
+                placeholder="Quick question…"
+                rows={2}
+              />
+              <button
+                onClick={() => void sendSideChat()}
+                disabled={!sideChatInput.trim() || sideChatStreaming}
+              >
+                {sideChatStreaming ? "…" : "Send"}
+              </button>
+            </div>
+          </aside>
+        ) : null}
+
         {(updateState.kind === "available" || updateState.kind === "downloaded") && (
           <div className="update-banner">
             <span>
@@ -1252,6 +1447,7 @@ export function App() {
                 artifacts={messageArtifacts}
                 onOpenArtifact={setActiveArtifact}
                 activeArtifactId={activeArtifact?.id ?? null}
+                density={settings.density ?? "normal"}
               />
             );
           })}

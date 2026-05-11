@@ -5,11 +5,18 @@
  */
 import { useEffect, useState } from "react";
 
+export type Density = "verbose" | "normal" | "summary";
+
 export type Settings = {
   model: string;        // "auto" | "haiku" | "sonnet" | "opus" | <openclaw alias>
   theme: "system" | "light" | "dark";
   gatewayUrl: string;   // override default ws://127.0.0.1:18789 if needed
   showCost: boolean;
+  /** Tool-call + metadata visibility on assistant messages. v0.1.32.
+   *  - verbose: tool strip expanded by default, full details
+   *  - normal:  tool strip collapsed (default since v0.1.18)
+   *  - summary: tool strip hidden entirely, just the final text */
+  density: Density;
 };
 
 const DEFAULTS: Settings = {
@@ -17,6 +24,7 @@ const DEFAULTS: Settings = {
   theme: "system",
   gatewayUrl: "ws://127.0.0.1:18789",
   showCost: false,
+  density: "normal",
 };
 
 const STORAGE_KEY = "prism.settings.v1";
