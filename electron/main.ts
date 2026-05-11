@@ -365,11 +365,8 @@ app.whenReady().then(() => {
   }, 5000);
 
   // …then re-check every 30 minutes for the lifetime of the app
-  // (v0.1.28 fix). Before this, a user who kept Prism open all day
-  // would only see updates that were released BEFORE they launched.
-  // 30 min is the standard cadence used by Slack / Discord / VSCode.
-  // Each call is cheap (HEAD request to GitHub Releases feed) and
-  // electron-updater dedupes when nothing changed.
+  // (v0.1.28 fix). Slack / Discord / VSCode cadence. Cheap HEAD
+  // request to GitHub Releases; electron-updater dedupes.
   setInterval(
     () => {
       autoUpdater
@@ -379,10 +376,15 @@ app.whenReady().then(() => {
     30 * 60 * 1000,
   );
 
-  // Also re-check when the window gains focus (user just came back
-  // to the app). Cheap, instant, fixes the "I have it open in
-  // a background tab" case.
+  // Focus-event re-check, but DEBOUNCED to once per 5 minutes max
+  // (v0.1.31 fix). The naive handler in v0.1.28 fired on every
+  // alt-tab — three checks in 30 seconds in production logs. GitHub
+  // rate-limits eventually and it pollutes the log either way.
+  let lastFocusCheck = 0;
   app.on("browser-window-focus", () => {
+    const now = Date.now();
+    if (now - lastFocusCheck < 5 * 60 * 1000) return;
+    lastFocusCheck = now;
     autoUpdater
       .checkForUpdatesAndNotify()
       .catch((e) => log.warn("focus update check failed", e));

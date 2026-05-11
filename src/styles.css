@@ -3602,3 +3602,667 @@ html, body, #root {
   font-family: var(--mono);
   letter-spacing: 0.02em;
 }
+
+/* ════════════════════════════════════════════════════════════════
+ *  v0.1.31 — Workshop redesign
+ *
+ *  Single design system that replaces the scattered overrides from
+ *  v0.1.26-v0.1.30. Goals:
+ *
+ *  - ONE accent color: deep indigo (#5750e8). Used for interactive
+ *    states (send button, active tab, focus ring, streaming border).
+ *  - The rainbow spectrum is reserved for the Prism wordmark ONLY.
+ *    Everywhere else it appeared was visual noise.
+ *  - Strong type scale: 22 / 18 / 14 / 12 / 10.5 / 9.5
+ *  - Consistent radius: 4 / 8 / 12 / 16
+ *  - Consistent elevation: sidebar (0), card (1), modal (3)
+ *  - Generous whitespace; fewer borders; light hover states
+ *
+ *  This layer is appended LAST in styles.css so it wins the cascade
+ *  on every visible surface. Earlier rules survive for structure +
+ *  edge cases.
+ * ════════════════════════════════════════════════════════════════ */
+
+:root {
+  /* ── Accent system ──────────────────────────────────────── */
+  --accent: #5750e8;
+  --accent-hover: #4842d4;
+  --accent-active: #3a35c2;
+  --accent-tint-12: rgba(87, 80, 232, 0.12);
+  --accent-tint-08: rgba(87, 80, 232, 0.08);
+  --accent-tint-04: rgba(87, 80, 232, 0.04);
+  --accent-ring: rgba(87, 80, 232, 0.32);
+
+  /* ── Surfaces ───────────────────────────────────────────── */
+  --bg: #fbfaf7;
+  --bg-card: #ffffff;
+  --bg-input: #f4f3ee;
+  --bg-overlay: rgba(20, 18, 14, 0.32);
+
+  --border: #ece9df;
+  --border-strong: #d6d2c2;
+
+  --ink: #1b1b1f;
+  --ink-soft: #4d4d56;
+  --ink-mute: #91919c;
+
+  /* ── Radius ─────────────────────────────────────────────── */
+  --r-1: 4px;
+  --r-2: 8px;
+  --r-3: 12px;
+  --r-4: 16px;
+
+  /* ── Elevation ──────────────────────────────────────────── */
+  --e-0: none;
+  --e-1: 0 1px 2px rgba(20, 18, 14, 0.04), 0 1px 0 rgba(20, 18, 14, 0.02);
+  --e-2: 0 2px 8px rgba(20, 18, 14, 0.06), 0 1px 0 rgba(20, 18, 14, 0.03);
+  --e-3: 0 12px 32px rgba(20, 18, 14, 0.12), 0 2px 0 rgba(20, 18, 14, 0.04);
+
+  /* Type scale (px) */
+  --t-h1: 22px;
+  --t-h2: 18px;
+  --t-body: 14px;
+  --t-small: 12px;
+  --t-micro: 10.5px;
+  --t-mono: 11.5px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e0e10;
+    --bg-card: #16161a;
+    --bg-input: #1b1b20;
+    --bg-overlay: rgba(0, 0, 0, 0.6);
+
+    --border: #2a2a30;
+    --border-strong: #3a3a42;
+
+    --ink: #f4f4f7;
+    --ink-soft: #c8c8d0;
+    --ink-mute: #7a7a85;
+
+    --accent: #7e78f0;
+    --accent-hover: #948ff5;
+    --accent-active: #6c66e8;
+    --accent-tint-12: rgba(126, 120, 240, 0.18);
+    --accent-tint-08: rgba(126, 120, 240, 0.12);
+    --accent-tint-04: rgba(126, 120, 240, 0.06);
+    --accent-ring: rgba(126, 120, 240, 0.36);
+
+    --e-1: 0 1px 2px rgba(0, 0, 0, 0.4), 0 1px 0 rgba(0, 0, 0, 0.2);
+    --e-2: 0 4px 12px rgba(0, 0, 0, 0.45), 0 1px 0 rgba(0, 0, 0, 0.25);
+    --e-3: 0 16px 36px rgba(0, 0, 0, 0.55), 0 2px 0 rgba(0, 0, 0, 0.3);
+  }
+}
+
+/* Brand wordmark — the ONE place the spectrum lives. */
+.brand {
+  font-family: var(--sans);
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: -0.02em;
+  background: linear-gradient(
+    90deg,
+    #ff5e5b 0%, #ffac41 18%, #ffd23f 36%,
+    #4ac29a 54%, #4d96ff 72%, #9b5de5 90%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Titlebar — single thin border, no spectrum bar */
+.titlebar {
+  height: 40px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  padding-left: 16px;
+  padding-right: 12px;
+  gap: 6px;
+}
+
+.titlebar::after { display: none; }
+
+.brand-version {
+  font-family: var(--mono);
+  font-size: var(--t-mono);
+  color: var(--ink-mute);
+  margin-left: 4px;
+  opacity: 0.7;
+}
+
+.titlebar-button {
+  width: 28px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--r-1);
+  background: transparent;
+  color: var(--ink-soft);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 0;
+  transition: background 100ms ease, color 100ms ease;
+}
+
+.titlebar-button:hover {
+  background: var(--bg-input);
+  color: var(--ink);
+}
+
+.titlebar-button.active {
+  background: var(--accent-tint-12);
+  color: var(--accent);
+}
+
+.titlebar-button-dot {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--bg);
+  margin-left: 0;
+}
+
+/* Sidebar — quieter background, no top-section borders */
+.sidebar {
+  width: 224px;
+  background: var(--bg);
+  border-right: 1px solid var(--border);
+}
+
+.sidebar-header {
+  padding: 6px 8px 6px 80px;
+  height: 40px;
+  border-bottom: 1px solid var(--border);
+}
+
+.sidebar-new-full {
+  height: 26px;
+  font-family: var(--sans);
+  font-size: var(--t-small);
+  font-weight: 500;
+  color: var(--ink-soft);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--r-1);
+  padding: 0 10px;
+  gap: 6px;
+}
+
+.sidebar-new-full:hover {
+  background: var(--bg-input);
+  color: var(--ink);
+  border-color: var(--border-strong);
+}
+
+.sidebar-search {
+  padding: 8px 10px 4px;
+  border-bottom: none;
+}
+
+.sidebar-search input {
+  background: var(--bg-input);
+  border: 1px solid transparent;
+  border-radius: var(--r-1);
+  padding: 6px 10px;
+  font-size: var(--t-small);
+  height: 26px;
+}
+
+.sidebar-search input:focus {
+  background: var(--bg-card);
+  border-color: var(--border-strong);
+}
+
+.sidebar-list {
+  padding: 4px 6px;
+}
+
+.sidebar-item {
+  padding: 8px 10px;
+  border-radius: var(--r-1);
+  margin-bottom: 1px;
+}
+
+.sidebar-item.active {
+  background: var(--accent-tint-08);
+  box-shadow: none;
+  outline: none;
+}
+
+.sidebar-item.active .sidebar-item-title {
+  color: var(--accent);
+}
+
+.sidebar-item-title {
+  font-size: 12.5px;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+.sidebar-item-meta {
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  opacity: 0.55;
+  text-transform: uppercase;
+  margin-top: 1px;
+}
+
+/* Project chips — quieter */
+.sidebar-projects {
+  padding: 6px 8px 4px;
+  border-bottom: none;
+  gap: 4px;
+}
+
+.sidebar-project-chip {
+  font-size: 10.5px;
+  padding: 3px 9px;
+  height: 20px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font-weight: 500;
+  color: var(--ink-mute);
+}
+
+.sidebar-project-chip:hover {
+  background: var(--bg-input);
+  color: var(--ink-soft);
+  border-color: var(--border-strong);
+}
+
+.sidebar-project-chip.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.sidebar-project-manage {
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  color: var(--ink-mute);
+}
+
+/* Chat region — generous whitespace */
+.chat {
+  padding: 28px 32px 16px;
+  gap: 20px;
+  background: var(--bg);
+}
+
+/* Message bubbles — Linear/Things grade rhythm */
+.msg.user {
+  background: var(--ink);
+  color: var(--bg);
+  border-bottom-right-radius: 6px;
+  font-size: var(--t-body);
+  font-weight: 500;
+  padding: 11px 16px;
+  border-radius: var(--r-3);
+  border-bottom-right-radius: 6px;
+  box-shadow: var(--e-1);
+}
+
+.msg.assistant {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-bottom-left-radius: 6px;
+  border-radius: var(--r-3);
+  border-bottom-left-radius: 6px;
+  padding: 16px 22px;
+  font-size: var(--t-body);
+  box-shadow: var(--e-1);
+  max-width: 86%;
+  line-height: 1.6;
+}
+
+.msg.assistant.streaming {
+  border-color: var(--accent-ring);
+  box-shadow: var(--e-1), 0 0 0 3px var(--accent-tint-04);
+}
+
+.msg.system {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--ink-mute);
+  font-style: normal;
+  font-size: var(--t-small);
+  padding: 5px 14px;
+  border-radius: 999px;
+  font-family: var(--mono);
+  letter-spacing: 0.02em;
+}
+
+/* Code blocks — cleaner chrome */
+.codeblock {
+  border-radius: var(--r-2);
+  box-shadow: none;
+  border: 1px solid var(--border);
+}
+
+.codeblock-header {
+  padding: 6px 14px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+
+.codeblock-lang {
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--ink-mute);
+}
+
+.codeblock-copy {
+  border-color: transparent;
+  background: transparent;
+}
+
+.codeblock-copy:hover {
+  background: var(--bg-input);
+  border-color: transparent;
+}
+
+.inline-code {
+  background: var(--accent-tint-08);
+  color: var(--accent);
+  border: none;
+  padding: 1px 6px;
+  border-radius: var(--r-1);
+  font-size: 0.92em;
+  font-weight: 500;
+}
+
+@media (prefers-color-scheme: dark) {
+  .inline-code {
+    background: var(--accent-tint-12);
+    color: #aaa6f7;
+  }
+}
+
+/* Composer — accent focus ring, accent send button */
+.composer {
+  padding: 12px 16px 16px;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.composer-hint {
+  padding: 0 4px 8px;
+  font-size: 10px;
+  color: var(--ink-mute);
+  letter-spacing: 0.03em;
+  font-family: var(--mono);
+}
+
+.composer textarea {
+  border-radius: var(--r-2);
+  font-family: var(--sans);
+  font-size: var(--t-body);
+  line-height: 1.55;
+  padding: 12px 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  box-shadow: var(--e-1);
+  transition: border-color 120ms ease, box-shadow 150ms ease;
+}
+
+.composer textarea:focus {
+  border-color: var(--accent);
+  box-shadow: var(--e-1), 0 0 0 3px var(--accent-ring);
+  background: var(--bg-card);
+}
+
+.composer button {
+  height: 36px;
+  border-radius: var(--r-2);
+  font-weight: 500;
+  font-size: var(--t-small);
+  letter-spacing: 0.01em;
+  transition: background 120ms ease, transform 80ms ease, border-color 120ms ease;
+}
+
+.composer-attach,
+.composer-voice {
+  width: 36px !important;
+  height: 36px !important;
+  padding: 0 !important;
+  border: 1px solid var(--border) !important;
+  background: transparent !important;
+  color: var(--ink-soft) !important;
+}
+
+.composer-attach:hover:not(:disabled),
+.composer-voice:hover:not(:disabled) {
+  background: var(--bg-input) !important;
+  color: var(--ink) !important;
+  border-color: var(--border-strong) !important;
+}
+
+.composer-voice.recording {
+  background: var(--accent) !important;
+  border-color: var(--accent) !important;
+  color: #fff !important;
+}
+
+.composer .batch-toggle {
+  height: 36px !important;
+  padding: 0 14px !important;
+  background: transparent !important;
+  color: var(--ink-soft) !important;
+  border: 1px solid var(--border) !important;
+  font-family: var(--mono) !important;
+  font-size: var(--t-micro) !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.08em !important;
+}
+
+.composer .batch-toggle:hover:not(:disabled) {
+  background: var(--bg-input) !important;
+  color: var(--ink) !important;
+  border-color: var(--border-strong) !important;
+}
+
+.composer .batch-toggle.active {
+  background: var(--accent-tint-12) !important;
+  color: var(--accent) !important;
+  border-color: var(--accent) !important;
+  box-shadow: none !important;
+}
+
+.composer-send {
+  background: var(--accent) !important;
+  color: #fff !important;
+  border: 1px solid var(--accent) !important;
+  font-weight: 600 !important;
+  padding: 0 20px !important;
+  min-width: 84px;
+  height: 36px !important;
+  box-shadow: var(--e-1) !important;
+}
+
+.composer-send:hover:not(:disabled) {
+  background: var(--accent-hover) !important;
+  border-color: var(--accent-hover) !important;
+}
+
+.composer-send:active:not(:disabled) {
+  background: var(--accent-active) !important;
+  transform: scale(0.98);
+}
+
+.composer-send:disabled {
+  background: var(--bg-input) !important;
+  color: var(--ink-mute) !important;
+  border-color: var(--border) !important;
+  box-shadow: none !important;
+  opacity: 1;
+}
+
+.composer .composer-stop {
+  background: #c0392b !important;
+  border-color: #c0392b !important;
+  color: #fff !important;
+  height: 36px !important;
+}
+
+/* Empty state — Linear-grade quiet welcome */
+.empty-state {
+  padding: 12% 40px 60px;
+  gap: 12px;
+}
+
+.empty-state .prism-mark {
+  width: 48px;
+  height: 48px;
+}
+
+.empty-state h2 {
+  font-size: var(--t-h1);
+  letter-spacing: -0.02em;
+}
+
+.empty-state .tagline {
+  font-size: var(--t-body);
+  line-height: 1.55;
+  max-width: 320px;
+  color: var(--ink-soft);
+}
+
+.empty-state .hint {
+  margin-top: 16px;
+  font-size: 9.5px;
+  font-family: var(--mono);
+  letter-spacing: 0.04em;
+  color: var(--ink-mute);
+  gap: 4px 8px;
+}
+
+.empty-state .hint kbd {
+  font-size: 9.5px;
+  padding: 1px 5px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--ink-soft);
+  font-weight: 500;
+}
+
+/* Settings modal — single elevation, refined chrome */
+.settings-overlay {
+  background: var(--bg-overlay);
+  backdrop-filter: blur(8px);
+}
+
+.settings-card {
+  border-radius: var(--r-4);
+  border: none;
+  box-shadow: var(--e-3);
+  background: var(--bg-card);
+}
+
+.settings-header {
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-header h2 {
+  font-size: var(--t-h2);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.settings-tab {
+  font-size: var(--t-small);
+  font-weight: 500;
+  color: var(--ink-mute);
+  border-radius: 0;
+  padding: 11px 14px;
+  border-bottom: 2px solid transparent;
+}
+
+.settings-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  background: transparent;
+}
+
+.settings-tab:hover:not(.active) {
+  color: var(--ink-soft);
+  background: var(--accent-tint-04);
+}
+
+.settings-primary {
+  background: var(--accent);
+  border-radius: var(--r-2);
+  font-weight: 600;
+  font-size: var(--t-small);
+}
+
+.settings-primary:hover {
+  background: var(--accent-hover);
+}
+
+/* Tool strip — quieter accent */
+.tools.running .tools-dot {
+  background: var(--accent);
+}
+
+.msg.assistant.streaming {
+  border-color: var(--accent);
+}
+
+/* Batch agent cards — accent for running */
+.batch-summary-label {
+  background: var(--accent);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.batch-agent-running {
+  border-color: var(--accent-ring);
+}
+
+.batch-agent-spinner {
+  border: 1.5px solid var(--accent-tint-12);
+  border-top-color: var(--accent);
+}
+
+/* Artifact chips */
+.artifact-chip {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--r-1);
+}
+
+.artifact-chip.active {
+  background: var(--accent-tint-08);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.artifact-chip.active .artifact-chip-type,
+.artifact-chip.active .artifact-chip-arrow {
+  color: var(--accent);
+}
+
+/* Slash menu — refined */
+.slash-menu {
+  border-radius: var(--r-2);
+  box-shadow: var(--e-2);
+  border: 1px solid var(--border);
+}
+
+.slash-menu-item.active {
+  background: var(--accent-tint-08);
+}
+
+.slash-menu-item.active .slash-menu-name {
+  color: var(--accent);
+}
