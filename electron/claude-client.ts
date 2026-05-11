@@ -304,6 +304,9 @@ async function send(params: {
   message: string;
   model?: string;
   sessionId?: string | null;
+  /** Project-level instructions injected as a system-prompt prefix,
+   *  ahead of the auto-profile. v0.1.29. */
+  projectInstructions?: string | null;
   window: BrowserWindow;
 }): Promise<{ turnId: string } | { error: string }> {
   const claudeBin = findClaudeBin();
@@ -368,6 +371,21 @@ async function send(params: {
   // context that isn't relevant to this query" — we can't joint-train
   // the LLM+retriever (claude is frozen on Anthropic's side), but we
   // can stop dumping irrelevant profile entries into every turn.
+  // v0.1.29: project-level instructions (if the chat belongs to a
+  // project) inject FIRST, ahead of the auto-profile. The user's
+  // explicit project preferences take priority over learned ones.
+  const projectInstructions = (params.projectInstructions ?? "").trim();
+  if (projectInstructions.length > 0) {
+    const wrapped = [
+      "<!-- Prism project instructions: the user has set these for ",
+      "all chats in this project. Treat them as authoritative for ",
+      "this conversation. -->",
+      "",
+      projectInstructions,
+    ].join("\n");
+    args.push("--append-system-prompt", wrapped);
+  }
+
   // v0.1.23: renderForInjection is now async so it can race the user-
   // message embedding against a 200ms timeout. Worst case (cold-start
   // model load) it falls back to lexical scoring — same path as
@@ -510,6 +528,7 @@ export function registerClaudeClient(getWindow: () => BrowserWindow | null) {
     message: string;
     model?: string;
     sessionId?: string | null;
+    projectInstructions?: string | null;
   }) => {
     const window = getWindow();
     if (!window) return { error: "no window" };

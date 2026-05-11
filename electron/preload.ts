@@ -30,8 +30,12 @@ contextBridge.exposeInMainWorld("flexhaul", {
   // Chat — spawns `claude` CLI per turn (v0.1.9)
   chat: {
     probe: () => ipcRenderer.invoke("prism:chat:probe"),
-    send: (params: { message: string; model?: string; sessionId?: string | null }) =>
-      ipcRenderer.invoke("prism:chat:send", params),
+    send: (params: {
+      message: string;
+      model?: string;
+      sessionId?: string | null;
+      projectInstructions?: string | null;
+    }) => ipcRenderer.invoke("prism:chat:send", params),
     abort: (turnId: string) => ipcRenderer.invoke("prism:chat:abort", { turnId }),
     onStart: (cb: (ev: { turnId: string; sessionId: string | null; model?: string }) => void) => {
       const listener = (_: unknown, ev: any) => cb(ev);

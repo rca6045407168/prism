@@ -101,6 +101,18 @@ function createWindow(): void {
     mainWindow.loadFile(path.join(__dirname, "..", "dist", "index.html"));
   }
 
+  // v0.1.29: allow renderer to request microphone access for voice
+  // input. Without this, getUserMedia() / webkitSpeechRecognition
+  // silently fail inside Electron. We auto-grant ONLY for media;
+  // every other permission stays denied by default.
+  mainWindow.webContents.session.setPermissionRequestHandler(
+    (_wc, permission, callback) => {
+      // Allow only media (mic + camera). Everything else stays denied.
+      if (permission === "media") callback(true);
+      else callback(false);
+    },
+  );
+
   // Open external links in user's browser, not inside the app
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith("http://") || url.startsWith("https://")) {

@@ -30,6 +30,9 @@ export type Chat = {
    *  init event. Lets us actually have separate conversations across chats
    *  on the backend (not just on the UI). v0.1.9. */
   claudeSessionId?: string | null;
+  /** Project this chat belongs to. When set, the project's `instructions`
+   *  are injected as a system-prompt prefix on every turn. v0.1.29. */
+  projectId?: string | null;
 };
 
 const CHATS_KEY = "prism.chats.v1";
@@ -68,7 +71,7 @@ export function getChat(id: string): Chat | null {
   return readAll()[id] ?? null;
 }
 
-export function createChat(): Chat {
+export function createChat(projectId: string | null = null): Chat {
   const id = genId();
   const now = Date.now();
   const chat: Chat = {
@@ -77,8 +80,64 @@ export function createChat(): Chat {
     messages: [],
     createdAt: now,
     updatedAt: now,
+    projectId,
   };
   const all = readAll();
+  all[id] = chat;
+  writeAll(all);
+  return chat;
+}
+
+/** v0.1.29: when a project is deleted, strip its id from every chat
+ *  so we don't dangle dead references. Chats themselves survive. */
+export function unassignFromProject(projectId: string): void {
+  const all = readAll();
+  let changed = false;
+  for (const id of Object.keys(all)) {
+    if (all[id]?.projectId === projectId) {
+      all[id] = { ...all[id], projectId: null, updatedAt: Date.now() };
+      changed = true;
+    }
+  }
+  if (changed) writeAll(all);
+}
+
+/** v0.1.29: assign / unassign a chat from a project. */
+export function setChatProject(id: string, projectId: string | null): Chat | null {
+  const all = readAll();
+  if (!all[id]) return null;
+  all[id] = { ...all[id], projectId, updatedAt: Date.now() };
+  writeAll(all);
+  return all[id];
+}
+
+/** v0.1.29: fork — clone messages up to (and including) a given
+ *  index into a brand-new chat with a fresh session. Used by the
+ *  "Branch from here" action. The new chat starts in the same
+ *  project as the parent. */
+export function forkChatAtIndex(
+  parentId: string,
+  uptoIndex: number,
+): Chat | null {
+  const all = readAll();
+  const parent = all[parentId];
+  if (!parent) return null;
+  const sliced = parent.messages.slice(0, uptoIndex + 1);
+  if (sliced.length === 0) return null;
+  const id = genId();
+  const now = Date.now();
+  const baseTitle = parent.title.replace(/^Branch of /, "");
+  const chat: Chat = {
+    id,
+    title: `Branch of ${baseTitle}`,
+    messages: sliced,
+    createdAt: now,
+    updatedAt: now,
+    projectId: parent.projectId ?? null,
+    // Fresh session — branches diverge on the backend too. claude will
+    // pick up the slice via the next user message; no --resume.
+    claudeSessionId: null,
+  };
   all[id] = chat;
   writeAll(all);
   return chat;

@@ -3163,3 +3163,246 @@ html, body, #root {
     color: var(--bg);
   }
 }
+
+/* ── v0.1.29: projects + voice + forking ─────────────────────── */
+
+/* Sidebar project chips — horizontal scrollable strip below the header */
+.sidebar-projects {
+  display: flex;
+  gap: 4px;
+  padding: 8px 10px 4px;
+  overflow-x: auto;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
+}
+
+.sidebar-projects::-webkit-scrollbar {
+  height: 4px;
+}
+
+.sidebar-project-chip {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--ink-mute);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  white-space: nowrap;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background 80ms ease, color 80ms ease, border-color 80ms ease;
+}
+
+.sidebar-project-chip:hover {
+  color: var(--ink);
+  background: var(--bg-input);
+  border-color: var(--border-strong);
+}
+
+.sidebar-project-chip.active {
+  background: var(--ink);
+  color: var(--bg);
+  border-color: var(--ink);
+}
+
+.sidebar-project-chip.ghost {
+  color: var(--ink-mute);
+  border-style: dashed;
+}
+
+.sidebar-project-manage {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  font-size: 11px;
+  color: var(--ink-mute);
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sidebar-project-manage:hover {
+  background: var(--bg-input);
+  color: var(--ink);
+}
+
+/* Voice mic button — same shape as attach, red+pulse when recording */
+.composer-voice {
+  width: 40px !important;
+  padding: 0 !important;
+  font-size: 14px !important;
+  color: var(--ink-mute) !important;
+  background: transparent !important;
+  border: 1px solid var(--border) !important;
+}
+
+.composer-voice:hover:not(:disabled) {
+  background: var(--bg-input) !important;
+  color: var(--ink) !important;
+  border-color: var(--border-strong) !important;
+}
+
+.composer-voice.recording {
+  background: #c0392b !important;
+  color: #fff !important;
+  border-color: #c0392b !important;
+  animation: voice-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes voice-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(192, 57, 43, 0.4); }
+  50%      { box-shadow: 0 0 0 6px rgba(192, 57, 43, 0); }
+}
+
+/* Branch button on user messages, next to Edit */
+.msg.user .msg-branch {
+  position: absolute;
+  bottom: -22px;
+  right: 64px; /* sits to the left of msg-edit (which is at right:0) */
+  width: auto;
+  padding: 2px 8px;
+  height: 20px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--ink-mute);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg-card);
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  opacity: 0;
+  transition: opacity 100ms ease;
+  white-space: nowrap;
+  z-index: 2;
+}
+
+.msg.user:hover .msg-branch {
+  opacity: 1;
+}
+
+.msg.user .msg-branch:hover {
+  color: var(--ink);
+  border-color: var(--border-strong);
+  background: var(--bg-input);
+}
+
+/* Project manager modal layout */
+.project-mgr {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 16px;
+  min-height: 360px;
+}
+
+.project-mgr-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-right: 12px;
+  border-right: 1px solid var(--border);
+}
+
+.project-mgr-list-head {
+  font-family: var(--mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-mute);
+  padding: 2px 0 6px;
+}
+
+.project-mgr-item {
+  padding: 7px 10px;
+  border-radius: 6px;
+  text-align: left;
+  font-size: 13px;
+  color: var(--ink-soft);
+  transition: background 80ms ease;
+}
+
+.project-mgr-item:hover {
+  background: var(--bg-input);
+  color: var(--ink);
+}
+
+.project-mgr-item.active {
+  background: var(--bg-input);
+  color: var(--ink);
+  font-weight: 500;
+  box-shadow: inset 2px 0 0 var(--ink);
+}
+
+.project-mgr-create {
+  margin-top: auto;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  gap: 6px;
+}
+
+.project-mgr-create input {
+  flex: 1;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 5px 8px;
+  font-size: 12px;
+  color: var(--ink);
+}
+
+.project-mgr-create input:focus {
+  border-color: var(--border-strong);
+  background: var(--bg-card);
+}
+
+.project-mgr-create button {
+  background: var(--ink);
+  color: var(--bg);
+  border-radius: 5px;
+  padding: 0 10px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.project-mgr-create button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.project-mgr-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.project-mgr-instructions {
+  width: 100%;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.5;
+  padding: 10px 12px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--ink);
+  resize: vertical;
+  min-height: 200px;
+}
+
+.project-mgr-instructions:focus {
+  border-color: var(--border-strong);
+  background: var(--bg-card);
+}
+
+.project-mgr-detail-footer {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}

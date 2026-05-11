@@ -10,6 +10,12 @@ type Props = {
   onRename: (id: string, title: string) => void;
   onDelete: (id: string) => void;
   onExport?: (id: string) => void;
+  // v0.1.29: projects
+  projects?: { id: string; name: string }[];
+  activeProjectId?: string | null;
+  onSelectProject?: (projectId: string | null) => void;
+  onManageProjects?: () => void;
+  onMoveChatToProject?: (chatId: string, projectId: string | null) => void;
   onToggle: () => void;
   searchQuery: string;
   onSearchChange: (q: string) => void;
@@ -24,6 +30,11 @@ export function Sidebar({
   onRename,
   onDelete,
   onExport,
+  projects,
+  activeProjectId,
+  onSelectProject,
+  onManageProjects,
+  onMoveChatToProject,
   onToggle,
   searchQuery,
   onSearchChange,
@@ -72,6 +83,47 @@ export function Sidebar({
           + New chat
         </button>
       </div>
+
+      {projects && projects.length > 0 && onSelectProject ? (
+        <div className="sidebar-projects">
+          <button
+            className={`sidebar-project-chip ${activeProjectId === null ? "active" : ""}`}
+            onClick={() => onSelectProject(null)}
+            title="All chats"
+          >
+            All
+          </button>
+          {projects.map((p) => (
+            <button
+              key={p.id}
+              className={`sidebar-project-chip ${activeProjectId === p.id ? "active" : ""}`}
+              onClick={() => onSelectProject(p.id)}
+              title={`Project: ${p.name}`}
+            >
+              {p.name}
+            </button>
+          ))}
+          {onManageProjects ? (
+            <button
+              className="sidebar-project-manage"
+              onClick={onManageProjects}
+              title="Manage projects"
+            >
+              ⚙
+            </button>
+          ) : null}
+        </div>
+      ) : onManageProjects ? (
+        <div className="sidebar-projects">
+          <button
+            className="sidebar-project-chip ghost"
+            onClick={onManageProjects}
+            title="Create a project"
+          >
+            + New project
+          </button>
+        </div>
+      ) : null}
 
       <div className="sidebar-search">
         <input

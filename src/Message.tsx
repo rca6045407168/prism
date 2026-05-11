@@ -251,6 +251,8 @@ type Props = {
   message: ChatMessage;
   streaming?: boolean;
   onEdit?: (newText: string) => void;
+  /** v0.1.29: fork from this message into a new chat. */
+  onBranch?: () => void;
   artifacts?: Artifact[];
   onOpenArtifact?: (a: Artifact) => void;
   activeArtifactId?: string | null;
@@ -260,6 +262,7 @@ export function Message({
   message,
   streaming = false,
   onEdit,
+  onBranch,
   artifacts = [],
   onOpenArtifact,
   activeArtifactId,
@@ -326,6 +329,15 @@ export function Message({
             title="Edit and regenerate from this point"
           >
             ✎ Edit
+          </button>
+        )}
+        {onBranch && (
+          <button
+            className="msg-branch"
+            onClick={onBranch}
+            title="Branch — fork a new chat from this point"
+          >
+            ⑂ Branch
           </button>
         )}
       </div>

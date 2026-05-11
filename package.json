@@ -1,6 +1,6 @@
 {
   "name": "prism",
-  "version": "0.1.28",
+  "version": "0.1.29",
   "description": "Prism \u2014 type N prompts, get N parallel agents, reconciled into one answer.",
   "author": {
     "name": "Richard Chen",
@@ -55,7 +55,8 @@
       "gatekeeperAssess": false,
       "identity": null,
       "extendInfo": {
-        "NSAppleEventsUsageDescription": "Prism needs to communicate with its local agent runtime."
+        "NSAppleEventsUsageDescription": "Prism needs to communicate with its local agent runtime.",
+        "NSMicrophoneUsageDescription": "Prism uses the microphone for voice input in the composer. Audio is processed by macOS's built-in dictation."
       }
     },
     "dmg": {

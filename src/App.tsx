@@ -13,6 +13,7 @@ import {
   visibleCommandCount,
 } from "./SlashCommandMenu";
 import { ArtifactPane } from "./ArtifactPane";
+import { ProjectManager } from "./ProjectManager";
 import { Artifact, extractArtifacts } from "./artifacts";
 import { downloadChatAsMarkdown } from "./export-chat";
 import {
@@ -34,7 +35,18 @@ import {
   loadActiveId,
   saveActiveId,
   migrateLegacyChat,
+  setChatProject,
+  forkChatAtIndex,
 } from "./chats";
+import {
+  Project,
+  listProjects,
+  createProject,
+  updateProject,
+  deleteProject,
+  getProject,
+} from "./projects";
+import { unassignFromProject } from "./chats";
 
 type UpdateState =
   | { kind: "idle" }
@@ -135,6 +147,14 @@ export function App() {
   const [dropOverlay, setDropOverlay] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Projects + voice (v0.1.29)
+  const [projects, setProjects] = useState<Project[]>(() => listProjects());
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
+  const [projectManagerOpen, setProjectManagerOpen] = useState(false);
+  const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
+  const [voiceRecording, setVoiceRecording] = useState(false);
+  const voiceRecRef = useRef<any>(null);
+
   // Multi-chat state (v0.1.5)
   const [chats, setChats] = useState<Chat[]>(() => {
     migrateLegacyChat();
@@ -223,6 +243,142 @@ export function App() {
     },
     [activeId, attachedFiles.length],
   );
+
+  // ── Projects (v0.1.29) ───────────────────────────────────
+  const refreshProjects = useCallback(() => {
+    setProjects(listProjects());
+  }, []);
+
+  const handleSelectProject = useCallback((projectId: string | null) => {
+    setActiveProjectId(projectId);
+    // Snap selection to the first chat in the project (or any chat
+    // if "All"); creates a fresh one if the project has zero chats.
+    setActiveId((curr) => {
+      const filtered = listChats().filter(
+        (c) => projectId === null || c.projectId === projectId,
+      );
+      if (filtered.length === 0) return curr; // composer is empty; user can hit + New chat
+      if (filtered.some((c) => c.id === curr)) return curr;
+      return filtered[0].id;
+    });
+  }, []);
+
+  const handleCreateProject = useCallback(
+    (name: string) => {
+      const p = createProject(name);
+      refreshProjects();
+      setActiveProjectId(p.id);
+      setEditingProjectId(p.id);
+    },
+    [refreshProjects],
+  );
+
+  const handleUpdateProject = useCallback(
+    (id: string, updates: { name?: string; instructions?: string }) => {
+      updateProject(id, updates);
+      refreshProjects();
+    },
+    [refreshProjects],
+  );
+
+  const handleDeleteProject = useCallback(
+    (id: string) => {
+      if (!window.confirm("Delete this project? Its chats survive (unassigned).")) return;
+      deleteProject(id);
+      unassignFromProject(id);
+      setChats(listChats());
+      refreshProjects();
+      if (activeProjectId === id) setActiveProjectId(null);
+      if (editingProjectId === id) setEditingProjectId(null);
+    },
+    [activeProjectId, editingProjectId, refreshProjects],
+  );
+
+  const handleMoveChatToProject = useCallback(
+    (chatId: string, projectId: string | null) => {
+      setChatProject(chatId, projectId);
+      setChats(listChats());
+    },
+    [],
+  );
+
+  // Fork — clone messages up to a user message index into a new chat.
+  const handleFork = useCallback(
+    (chatId: string, uptoIndex: number) => {
+      const fresh = forkChatAtIndex(chatId, uptoIndex);
+      if (!fresh) return;
+      setChats(listChats());
+      setActiveId(fresh.id);
+    },
+    [],
+  );
+
+  // ── Voice input (v0.1.29) ────────────────────────────────
+  // Browser Web Speech API. On macOS this routes through Apple's
+  // dictation service (privacy note: audio leaves the device to
+  // Apple, not to us). Streams interim results into the composer.
+  const startVoice = useCallback(() => {
+    const SR =
+      (window as any).webkitSpeechRecognition ||
+      (window as any).SpeechRecognition;
+    if (!SR) {
+      setError("Voice input not available in this build.");
+      return;
+    }
+    const rec = new SR();
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.lang = "en-US";
+    let interimBase = "";
+    rec.onstart = () => {
+      // Snapshot whatever is already in the textarea so we append.
+      interimBase = ""; // we'll set this from current input on first chunk
+    };
+    rec.onresult = (event: any) => {
+      let final = "";
+      let interim = "";
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const t = event.results[i][0]?.transcript ?? "";
+        if (event.results[i].isFinal) final += t;
+        else interim += t;
+      }
+      if (final) {
+        setInput((curr) => (curr ? curr.trimEnd() + " " + final.trim() : final.trim()));
+      }
+      // (we don't render interim — keeps the textarea clean; final-only
+      // matches Mac dictation UX)
+    };
+    rec.onerror = (e: any) => {
+      setError(`Voice: ${e?.error ?? "unknown error"}`);
+      setVoiceRecording(false);
+    };
+    rec.onend = () => {
+      setVoiceRecording(false);
+      voiceRecRef.current = null;
+    };
+    voiceRecRef.current = rec;
+    setVoiceRecording(true);
+    try {
+      rec.start();
+    } catch (e: any) {
+      setError(`Voice: ${e?.message ?? String(e)}`);
+      setVoiceRecording(false);
+    }
+  }, []);
+
+  const stopVoice = useCallback(() => {
+    try {
+      voiceRecRef.current?.stop();
+    } catch {
+      /* ignore */
+    }
+    setVoiceRecording(false);
+  }, []);
+
+  const toggleVoice = useCallback(() => {
+    if (voiceRecording) stopVoice();
+    else startVoice();
+  }, [voiceRecording, startVoice, stopVoice]);
 
   const removeAttachment = useCallback((id: string) => {
     setAttachedFiles((prev) => {
@@ -572,10 +728,12 @@ export function App() {
 
   // Chat management
   const handleNewChat = useCallback(() => {
-    const fresh = createChat();
+    // New chats inherit the active project so they show up under it
+    // immediately. If user is in "All", the chat is unaffiliated.
+    const fresh = createChat(activeProjectId);
     setChats((prev) => [fresh, ...prev]);
     setActiveId(fresh.id);
-  }, []);
+  }, [activeProjectId]);
 
   const handleSelectChat = useCallback((id: string) => {
     setActiveId(id);
@@ -676,10 +834,17 @@ export function App() {
 
     // Send via IPC. Resume the chat's claude session if we have one.
     const sessionId = activeChat?.claudeSessionId ?? null;
+    // v0.1.29: if the chat belongs to a project, surface its
+    // instructions so the main process can inject them as a
+    // system-prompt prefix.
+    const projectInstructions = activeChat?.projectId
+      ? getProject(activeChat.projectId)?.instructions ?? null
+      : null;
     const result = await window.flexhaul.chat.send({
       message: toSend,
       model: settings.model,
       sessionId,
+      projectInstructions,
     });
     if ("error" in result) {
       updateActiveMessages((prev) => [
@@ -766,7 +931,11 @@ export function App() {
     );
   }
 
-  const visibleChats = searchQuery ? searchChats(searchQuery) : chats;
+  // v0.1.29: filter by active project on top of any search filter.
+  let visibleChats = searchQuery ? searchChats(searchQuery) : chats;
+  if (activeProjectId !== null) {
+    visibleChats = visibleChats.filter((c) => c.projectId === activeProjectId);
+  }
 
   return (
     <div className="app app-with-sidebar">
@@ -779,6 +948,11 @@ export function App() {
         onRename={handleRenameChat}
         onDelete={handleDeleteChat}
         onExport={handleExportChat}
+        projects={projects.map((p) => ({ id: p.id, name: p.name }))}
+        activeProjectId={activeProjectId}
+        onSelectProject={handleSelectProject}
+        onManageProjects={() => setProjectManagerOpen(true)}
+        onMoveChatToProject={handleMoveChatToProject}
         onToggle={() => setSidebarCollapsed((v) => !v)}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
@@ -818,6 +992,19 @@ export function App() {
           onClose={() => setSettingsOpen(false)}
           onChange={setSettings}
           current={settings}
+        />
+
+        <ProjectManager
+          open={projectManagerOpen}
+          onClose={() => {
+            setProjectManagerOpen(false);
+            setEditingProjectId(null);
+          }}
+          projects={projects}
+          initialEditId={editingProjectId}
+          onCreate={handleCreateProject}
+          onUpdate={handleUpdateProject}
+          onDelete={handleDeleteProject}
         />
 
         {(updateState.kind === "available" || updateState.kind === "downloaded") && (
@@ -906,12 +1093,22 @@ export function App() {
                 : undefined;
             const messageArtifacts =
               m.role === "assistant" ? extractArtifacts(m.text, `m-${i}`) : [];
+            // v0.1.29: branch action on user messages. Clones the
+            // conversation up to and including this message into a
+            // fresh chat, then activates it. Useful when you want to
+            // explore a different direction without losing the
+            // original thread.
+            const onBranch =
+              m.role === "user" && activeId
+                ? () => handleFork(activeId, i)
+                : undefined;
             return (
               <Message
                 key={i}
                 message={m}
                 streaming={isStreaming}
                 onEdit={onEdit}
+                onBranch={onBranch}
                 artifacts={messageArtifacts}
                 onOpenArtifact={setActiveArtifact}
                 activeArtifactId={activeArtifact?.id ?? null}
@@ -1049,6 +1246,17 @@ export function App() {
                 }
               >
                 📎
+              </button>
+              <button
+                className={`composer-voice${voiceRecording ? " recording" : ""}`}
+                onClick={toggleVoice}
+                title={
+                  voiceRecording
+                    ? "Stop recording"
+                    : "Voice input (browser dictation)"
+                }
+              >
+                {voiceRecording ? "●" : "🎙"}
               </button>
               <button
                 className={`batch-toggle ${batchMode ? "active" : ""}`}

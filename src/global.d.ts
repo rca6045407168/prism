@@ -118,6 +118,7 @@ declare global {
           message: string;
           model?: string;
           sessionId?: string | null;
+          projectInstructions?: string | null;
         }) => Promise<{ turnId: string } | { error: string }>;
         abort: (turnId: string) => Promise<{ ok: boolean }>;
         onStart: (
