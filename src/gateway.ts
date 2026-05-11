@@ -26,6 +26,15 @@ export type ToolEvent = {
   status: "running" | "done" | "error";
 };
 
+export type BatchAgent = {
+  index: number;
+  prompt: string;
+  status: "running" | "done" | "error";
+  text: string;
+  error?: string;
+  tier?: string;
+};
+
 export type ChatMessage = {
   role: "user" | "assistant" | "system";
   text: string;
@@ -33,6 +42,12 @@ export type ChatMessage = {
   batchCount?: number;
   /** Tool calls observed during this assistant turn. v0.1.18. */
   tools?: ToolEvent[];
+  /** Real parallel batch result, when this message is the assistant
+   *  side of a /batch turn. Each agent has its own live status + text;
+   *  reconciled is the Haiku-synthesized final summary. v0.1.30. */
+  batchAgents?: BatchAgent[];
+  reconciled?: string;
+  reconcilerStatus?: "pending" | "running" | "done" | "skipped";
 };
 
 export type StreamEvent =

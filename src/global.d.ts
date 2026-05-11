@@ -152,6 +152,21 @@ declare global {
             resultPreview?: string;
           }) => void,
         ) => () => void;
+        // v0.1.30: true parallel batch
+        sendBatch: (params: {
+          prompts: string[];
+          model?: string;
+          projectInstructions?: string | null;
+        }) => Promise<{ batchId: string } | { error: string }>;
+        abortBatch: (batchId: string) => Promise<{ ok: boolean }>;
+        onBatchStart: (cb: (ev: { batchId: string; promptCount: number; prompts: string[] }) => void) => () => void;
+        onBatchAgentStart: (cb: (ev: { batchId: string; index: number; prompt: string; tier: string }) => void) => () => void;
+        onBatchAgentDelta: (cb: (ev: { batchId: string; index: number; text: string }) => void) => () => void;
+        onBatchAgentEnd: (cb: (ev: { batchId: string; index: number; finalText: string }) => void) => () => void;
+        onBatchAgentError: (cb: (ev: { batchId: string; index: number; error: string }) => void) => () => void;
+        onBatchReconcileStart: (cb: (ev: { batchId: string }) => void) => () => void;
+        onBatchReconcileDelta: (cb: (ev: { batchId: string; text: string }) => void) => () => void;
+        onBatchEnd: (cb: (ev: { batchId: string; reconciled: string; skippedReason?: string }) => void) => () => void;
       };
       profile: {
         get: () => Promise<ProfileData>;

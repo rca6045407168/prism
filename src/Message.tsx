@@ -20,8 +20,72 @@
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ChatMessage, ToolEvent } from "./gateway";
+import { Pencil, GitBranch, Copy as CopyIcon, Check } from "lucide-react";
+import { ChatMessage, ToolEvent, BatchAgent } from "./gateway";
 import { Artifact } from "./artifacts";
+
+/** Per-agent card for a parallel /batch turn (v0.1.30). */
+function BatchAgentCard({ agent }: { agent: BatchAgent }) {
+  return (
+    <div className={`batch-agent batch-agent-${agent.status}`}>
+      <div className="batch-agent-head">
+        <div className="batch-agent-status">
+          {agent.status === "running" ? (
+            <span className="batch-agent-spinner" />
+          ) : agent.status === "error" ? (
+            <span className="batch-agent-x">×</span>
+          ) : (
+            <span className="batch-agent-check">✓</span>
+          )}
+        </div>
+        <div className="batch-agent-meta">
+          <div className="batch-agent-prompt">{agent.prompt}</div>
+          {agent.tier ? (
+            <div className="batch-agent-tier">{agent.tier}</div>
+          ) : null}
+        </div>
+      </div>
+      {agent.status === "error" ? (
+        <div className="batch-agent-error">{agent.error ?? "error"}</div>
+      ) : (
+        <div className="batch-agent-body">
+          {agent.text || (agent.status === "running" ? "…" : "(no output)")}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BatchSection({ message }: { message: ChatMessage }) {
+  const agents = message.batchAgents ?? [];
+  const completed = agents.filter((a) => a.status === "done").length;
+  const errored = agents.filter((a) => a.status === "error").length;
+  const running = agents.length - completed - errored;
+  return (
+    <div className="batch-section">
+      <div className="batch-summary">
+        <span className="batch-summary-label">
+          {agents.length} parallel agents
+        </span>
+        <span className="batch-summary-stats">
+          {running > 0 ? `${running} running · ` : ""}
+          {completed} done
+          {errored > 0 ? ` · ${errored} failed` : ""}
+        </span>
+      </div>
+      <div className="batch-agents-grid">
+        {agents.map((a) => (
+          <BatchAgentCard key={a.index} agent={a} />
+        ))}
+      </div>
+      {message.reconcilerStatus === "running" ? (
+        <div className="batch-reconciler-status">
+          <span className="batch-agent-spinner" /> Reconciling with Haiku…
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 /**
  * Convert a raw tool name like "mcp__claude_ai_Gmail__search_threads"
@@ -328,7 +392,7 @@ export function Message({
             onClick={startEdit}
             title="Edit and regenerate from this point"
           >
-            ✎ Edit
+            <Pencil size={10} strokeWidth={2.2} /> Edit
           </button>
         )}
         {onBranch && (
@@ -337,7 +401,7 @@ export function Message({
             onClick={onBranch}
             title="Branch — fork a new chat from this point"
           >
-            ⑂ Branch
+            <GitBranch size={10} strokeWidth={2.2} /> Branch
           </button>
         )}
       </div>
@@ -356,6 +420,9 @@ export function Message({
       </button>
       {message.tools && message.tools.length > 0 ? (
         <ToolStrip tools={message.tools} />
+      ) : null}
+      {message.batchAgents && message.batchAgents.length > 0 ? (
+        <BatchSection message={message} />
       ) : null}
       {artifacts.length > 0 && onOpenArtifact ? (
         <div className="artifact-strip">

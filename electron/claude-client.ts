@@ -523,6 +523,390 @@ function abort(turnId: string): { ok: boolean } {
   return { ok: true };
 }
 
+/**
+ * True parallel batch (v0.1.30) — finally honors Prism's tagline.
+ *
+ * Before this: `/batch` was a SKILL inside a single claude turn.
+ * claude pretended to fan out via the Task tool, all from one
+ * process. Not actually parallel; just a claude-side orchestrator.
+ *
+ * Now: Prism owns the orchestration. For N prompts, spawn N
+ * independent `claude --print` processes concurrently, each with
+ * its own auto-routed model. Stream their output back tagged by
+ * agent index so the renderer can paint live progress per agent.
+ * After all N return (or error / timeout), spawn ONE reconciler
+ * with `--model haiku` that takes the N answers and synthesizes
+ * a final coherent response — the reduce step that v0.2 backlog's
+ * "Prism-side batch orchestrator" predicted.
+ *
+ * Failure modes:
+ *  - Any agent erroring doesn't abort the batch. We render the
+ *    error in that agent's card and continue.
+ *  - Reconciler is skipped if 0 agents succeeded.
+ *  - User can abort the whole batch with abortBatch(batchId).
+ */
+type BatchAgent = {
+  index: number;
+  prompt: string;
+  proc: ChildProcess | null;
+  buffer: string;
+  finalText: string;
+  errored: boolean;
+  done: boolean;
+  errorMsg?: string;
+};
+
+type Batch = {
+  batchId: string;
+  window: BrowserWindow;
+  agents: BatchAgent[];
+  reconcilerProc: ChildProcess | null;
+  aborted: boolean;
+};
+
+const activeBatches = new Map<string, Batch>();
+
+function buildBaseArgs(model: string | null): string[] {
+  const args = [
+    "--print",
+    "--output-format", "stream-json",
+    "--verbose",
+    "--permission-mode", "bypassPermissions",
+    "--allow-dangerously-skip-permissions",
+  ];
+  if (model) args.push("--model", model);
+  return args;
+}
+
+function augmentedEnvPath(): string {
+  const HOME = process.env.HOME ?? "";
+  return [
+    `${HOME}/.openclaw/bin`,
+    `${HOME}/.local/bin`,
+    `${HOME}/.npm-global/bin`,
+    `${HOME}/bin`,
+    "/opt/homebrew/bin",
+    "/opt/homebrew/sbin",
+    "/usr/local/opt/node/bin",
+    "/usr/local/bin",
+    "/usr/local/sbin",
+    process.env.PATH ?? "",
+    "/usr/bin",
+    "/bin",
+  ]
+    .filter(Boolean)
+    .join(":");
+}
+
+function spawnAgentProcess(
+  claudeBin: string,
+  args: string[],
+  prompt: string,
+): ChildProcess {
+  const HOME = process.env.HOME ?? "";
+  return spawn(claudeBin, [...args, prompt], {
+    stdio: ["ignore", "pipe", "pipe"],
+    cwd: HOME || undefined,
+    env: { ...process.env, PATH: augmentedEnvPath() },
+  });
+}
+
+function sendBatch(params: {
+  prompts: string[];
+  model?: string;
+  projectInstructions?: string | null;
+  window: BrowserWindow;
+}): { batchId: string } | { error: string } {
+  const claudeBin = findClaudeBin();
+  if (!claudeBin) {
+    return { error: "Claude CLI not found." };
+  }
+  const cleanPrompts = params.prompts
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0);
+  if (cleanPrompts.length === 0) {
+    return { error: "No prompts in batch." };
+  }
+  const batchId = `b-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+
+  const agents: BatchAgent[] = cleanPrompts.map((prompt, index) => ({
+    index,
+    prompt,
+    proc: null,
+    buffer: "",
+    finalText: "",
+    errored: false,
+    done: false,
+  }));
+
+  const batch: Batch = {
+    batchId,
+    window: params.window,
+    agents,
+    reconcilerProc: null,
+    aborted: false,
+  };
+  activeBatches.set(batchId, batch);
+
+  emit(params.window, "prism:batch:start", {
+    batchId,
+    promptCount: cleanPrompts.length,
+    prompts: cleanPrompts,
+  });
+
+  const projectBlock = (params.projectInstructions ?? "").trim();
+  // Spawn all agents in parallel
+  for (const agent of agents) {
+    // Per-agent auto-routing
+    const tier =
+      params.model && params.model !== "auto"
+        ? params.model
+        : routeModel(agent.prompt);
+    const baseArgs = buildBaseArgs(tier);
+    if (projectBlock) {
+      baseArgs.push(
+        "--append-system-prompt",
+        [
+          "<!-- Prism project instructions: authoritative for this conversation. -->",
+          "",
+          projectBlock,
+        ].join("\n"),
+      );
+    }
+
+    let proc: ChildProcess;
+    try {
+      proc = spawnAgentProcess(claudeBin, baseArgs, agent.prompt);
+    } catch (e: any) {
+      agent.errored = true;
+      agent.errorMsg = `spawn failed: ${e?.message ?? String(e)}`;
+      agent.done = true;
+      emit(params.window, "prism:batch:agent:error", {
+        batchId,
+        index: agent.index,
+        error: agent.errorMsg,
+      });
+      maybeStartReconciler(batch, claudeBin, params.projectInstructions ?? null);
+      continue;
+    }
+    agent.proc = proc;
+    emit(params.window, "prism:batch:agent:start", {
+      batchId,
+      index: agent.index,
+      prompt: agent.prompt,
+      tier,
+    });
+
+    proc.stdout?.on("data", (chunk: Buffer) => {
+      if (batch.aborted) return;
+      agent.buffer += chunk.toString();
+      let i: number;
+      while ((i = agent.buffer.indexOf("\n")) >= 0) {
+        const line = agent.buffer.slice(0, i);
+        agent.buffer = agent.buffer.slice(i + 1);
+        const trimmed = line.trim();
+        if (!trimmed.startsWith("{")) continue;
+        let parsed: any;
+        try {
+          parsed = JSON.parse(trimmed);
+        } catch {
+          continue;
+        }
+        if (parsed.type === "assistant" && parsed.message?.content) {
+          let combined = "";
+          for (const b of parsed.message.content) {
+            if (b.type === "text" && typeof b.text === "string") combined += b.text;
+          }
+          if (combined.length > agent.finalText.length) {
+            const delta = combined.slice(agent.finalText.length);
+            agent.finalText = combined;
+            emit(params.window, "prism:batch:agent:delta", {
+              batchId,
+              index: agent.index,
+              text: delta,
+            });
+          }
+        }
+        if (parsed.type === "result" && parsed.is_error) {
+          const errs = Array.isArray(parsed.errors)
+            ? parsed.errors.filter((e: unknown) => typeof e === "string").join("; ")
+            : "";
+          agent.errored = true;
+          agent.errorMsg = errs || parsed.result || "claude error";
+        }
+      }
+    });
+
+    proc.on("close", (code) => {
+      agent.done = true;
+      if (!agent.errored && code !== 0) {
+        agent.errored = true;
+        agent.errorMsg = `claude exited with code ${code}`;
+      }
+      if (agent.errored) {
+        emit(params.window, "prism:batch:agent:error", {
+          batchId,
+          index: agent.index,
+          error: agent.errorMsg,
+        });
+      } else {
+        emit(params.window, "prism:batch:agent:end", {
+          batchId,
+          index: agent.index,
+          finalText: agent.finalText,
+        });
+      }
+      maybeStartReconciler(batch, claudeBin, params.projectInstructions ?? null);
+    });
+
+    proc.on("error", (e) => {
+      agent.errored = true;
+      agent.errorMsg = `spawn error: ${e.message}`;
+      agent.done = true;
+      emit(params.window, "prism:batch:agent:error", {
+        batchId,
+        index: agent.index,
+        error: agent.errorMsg,
+      });
+      maybeStartReconciler(batch, claudeBin, params.projectInstructions ?? null);
+    });
+  }
+
+  return { batchId };
+}
+
+function maybeStartReconciler(
+  batch: Batch,
+  claudeBin: string,
+  projectInstructions: string | null,
+): void {
+  if (batch.aborted) return;
+  if (batch.reconcilerProc) return; // already started
+  // Wait for ALL agents to finish (success or error)
+  if (batch.agents.some((a) => !a.done)) return;
+
+  const successful = batch.agents.filter((a) => !a.errored && a.finalText.trim().length > 0);
+  if (successful.length === 0) {
+    // Nothing to reconcile
+    emit(batch.window, "prism:batch:end", {
+      batchId: batch.batchId,
+      reconciled: "",
+      skippedReason: "all agents errored",
+    });
+    activeBatches.delete(batch.batchId);
+    return;
+  }
+
+  // Build the reconciler prompt
+  const sections = successful
+    .map(
+      (a) =>
+        `### Prompt ${a.index + 1}: ${a.prompt}\n\nAgent ${a.index + 1} answered:\n${a.finalText.trim()}`,
+    )
+    .join("\n\n---\n\n");
+
+  const reconcilerPrompt = `You are a reconciler. ${successful.length} parallel agents each answered a different prompt. Summarize their answers into a single coherent reply that addresses every prompt in order. Format with ## headings per prompt. Be concise — assume the agent answers are already correct; your job is presentation, not re-reasoning.
+
+${sections}
+
+Render the unified response now. No preamble.`;
+
+  emit(batch.window, "prism:batch:reconcile:start", { batchId: batch.batchId });
+
+  const args = buildBaseArgs("haiku");
+  if (projectInstructions && projectInstructions.trim()) {
+    args.push(
+      "--append-system-prompt",
+      [
+        "<!-- Prism project instructions: authoritative for this conversation. -->",
+        "",
+        projectInstructions.trim(),
+      ].join("\n"),
+    );
+  }
+
+  let proc: ChildProcess;
+  try {
+    proc = spawnAgentProcess(claudeBin, args, reconcilerPrompt);
+  } catch (e: any) {
+    emit(batch.window, "prism:batch:end", {
+      batchId: batch.batchId,
+      reconciled: "",
+      skippedReason: `reconciler spawn failed: ${e?.message ?? String(e)}`,
+    });
+    activeBatches.delete(batch.batchId);
+    return;
+  }
+  batch.reconcilerProc = proc;
+
+  let buffer = "";
+  let finalText = "";
+  proc.stdout?.on("data", (chunk: Buffer) => {
+    if (batch.aborted) return;
+    buffer += chunk.toString();
+    let i: number;
+    while ((i = buffer.indexOf("\n")) >= 0) {
+      const line = buffer.slice(0, i);
+      buffer = buffer.slice(i + 1);
+      const trimmed = line.trim();
+      if (!trimmed.startsWith("{")) continue;
+      let parsed: any;
+      try {
+        parsed = JSON.parse(trimmed);
+      } catch {
+        continue;
+      }
+      if (parsed.type === "assistant" && parsed.message?.content) {
+        let combined = "";
+        for (const b of parsed.message.content) {
+          if (b.type === "text" && typeof b.text === "string") combined += b.text;
+        }
+        if (combined.length > finalText.length) {
+          const delta = combined.slice(finalText.length);
+          finalText = combined;
+          emit(batch.window, "prism:batch:reconcile:delta", {
+            batchId: batch.batchId,
+            text: delta,
+          });
+        }
+      }
+    }
+  });
+
+  proc.on("close", () => {
+    emit(batch.window, "prism:batch:end", {
+      batchId: batch.batchId,
+      reconciled: finalText,
+    });
+    activeBatches.delete(batch.batchId);
+  });
+}
+
+function abortBatch(batchId: string): { ok: boolean } {
+  const batch = activeBatches.get(batchId);
+  if (!batch) return { ok: false };
+  batch.aborted = true;
+  for (const agent of batch.agents) {
+    try {
+      agent.proc?.kill("SIGTERM");
+    } catch {
+      /* ignore */
+    }
+  }
+  try {
+    batch.reconcilerProc?.kill("SIGTERM");
+  } catch {
+    /* ignore */
+  }
+  activeBatches.delete(batchId);
+  emit(batch.window, "prism:batch:end", {
+    batchId,
+    reconciled: "",
+    skippedReason: "aborted",
+  });
+  return { ok: true };
+}
+
 export function registerClaudeClient(getWindow: () => BrowserWindow | null) {
   ipcMain.handle("prism:chat:send", (_e, params: {
     message: string;
@@ -537,6 +921,24 @@ export function registerClaudeClient(getWindow: () => BrowserWindow | null) {
 
   ipcMain.handle("prism:chat:abort", (_e, params: { turnId: string }) => {
     return abort(params.turnId);
+  });
+
+  // v0.1.30: real parallel batch — N concurrent claude processes
+  // + Haiku reconciler.
+  ipcMain.handle(
+    "prism:chat:sendBatch",
+    (_e, params: {
+      prompts: string[];
+      model?: string;
+      projectInstructions?: string | null;
+    }) => {
+      const window = getWindow();
+      if (!window) return { error: "no window" };
+      return sendBatch({ ...params, window });
+    },
+  );
+  ipcMain.handle("prism:chat:abortBatch", (_e, params: { batchId: string }) => {
+    return abortBatch(params.batchId);
   });
 
   ipcMain.handle("prism:chat:probe", () => {

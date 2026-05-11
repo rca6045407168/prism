@@ -1,5 +1,13 @@
 import { useState } from "react";
 import type { Chat } from "./chats";
+import {
+  PanelLeft,
+  Plus,
+  Pencil,
+  Download,
+  X as XIcon,
+  Settings as SettingsIcon,
+} from "lucide-react";
 
 type Props = {
   chats: Chat[];
@@ -60,14 +68,14 @@ export function Sidebar({
           onClick={onToggle}
           title="Show sidebar (⌘1)"
         >
-          ☰
+          <PanelLeft size={14} />
         </button>
         <button
           className="sidebar-toggle sidebar-new"
           onClick={onNewChat}
           title="New chat (⌘N)"
         >
-          +
+          <Plus size={14} />
         </button>
       </div>
     );
@@ -77,10 +85,10 @@ export function Sidebar({
     <div className="sidebar">
       <div className="sidebar-header">
         <button className="sidebar-toggle" onClick={onToggle} title="Hide sidebar (⌘1)">
-          ☰
+          <PanelLeft size={14} />
         </button>
         <button className="sidebar-new-full" onClick={onNewChat} title="New chat (⌘N)">
-          + New chat
+          <Plus size={12} strokeWidth={2.5} /> New chat
         </button>
       </div>
 
@@ -109,7 +117,7 @@ export function Sidebar({
               onClick={onManageProjects}
               title="Manage projects"
             >
-              ⚙
+              <SettingsIcon size={11} strokeWidth={2} />
             </button>
           ) : null}
         </div>
@@ -174,7 +182,7 @@ export function Sidebar({
                 }}
                 title="Rename"
               >
-                ✎
+                <Pencil size={11} strokeWidth={2} />
               </button>
               {onExport ? (
                 <button
@@ -185,7 +193,7 @@ export function Sidebar({
                   }}
                   title="Export chat as markdown"
                 >
-                  ↓
+                  <Download size={11} strokeWidth={2} />
                 </button>
               ) : null}
               <button
@@ -198,7 +206,7 @@ export function Sidebar({
                 }}
                 title="Delete"
               >
-                ×
+                <XIcon size={12} strokeWidth={2.5} />
               </button>
             </div>
           </div>

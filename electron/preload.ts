@@ -63,6 +63,56 @@ contextBridge.exposeInMainWorld("flexhaul", {
       ipcRenderer.on("prism:chat:tool", listener);
       return () => ipcRenderer.removeListener("prism:chat:tool", listener);
     },
+    // v0.1.30: true parallel batch
+    sendBatch: (params: {
+      prompts: string[];
+      model?: string;
+      projectInstructions?: string | null;
+    }) => ipcRenderer.invoke("prism:chat:sendBatch", params),
+    abortBatch: (batchId: string) =>
+      ipcRenderer.invoke("prism:chat:abortBatch", { batchId }),
+    onBatchStart: (cb: (ev: any) => void) => {
+      const listener = (_: unknown, ev: any) => cb(ev);
+      ipcRenderer.on("prism:batch:start", listener);
+      return () => ipcRenderer.removeListener("prism:batch:start", listener);
+    },
+    onBatchAgentStart: (cb: (ev: any) => void) => {
+      const listener = (_: unknown, ev: any) => cb(ev);
+      ipcRenderer.on("prism:batch:agent:start", listener);
+      return () => ipcRenderer.removeListener("prism:batch:agent:start", listener);
+    },
+    onBatchAgentDelta: (cb: (ev: any) => void) => {
+      const listener = (_: unknown, ev: any) => cb(ev);
+      ipcRenderer.on("prism:batch:agent:delta", listener);
+      return () => ipcRenderer.removeListener("prism:batch:agent:delta", listener);
+    },
+    onBatchAgentEnd: (cb: (ev: any) => void) => {
+      const listener = (_: unknown, ev: any) => cb(ev);
+      ipcRenderer.on("prism:batch:agent:end", listener);
+      return () => ipcRenderer.removeListener("prism:batch:agent:end", listener);
+    },
+    onBatchAgentError: (cb: (ev: any) => void) => {
+      const listener = (_: unknown, ev: any) => cb(ev);
+      ipcRenderer.on("prism:batch:agent:error", listener);
+      return () => ipcRenderer.removeListener("prism:batch:agent:error", listener);
+    },
+    onBatchReconcileStart: (cb: (ev: any) => void) => {
+      const listener = (_: unknown, ev: any) => cb(ev);
+      ipcRenderer.on("prism:batch:reconcile:start", listener);
+      return () =>
+        ipcRenderer.removeListener("prism:batch:reconcile:start", listener);
+    },
+    onBatchReconcileDelta: (cb: (ev: any) => void) => {
+      const listener = (_: unknown, ev: any) => cb(ev);
+      ipcRenderer.on("prism:batch:reconcile:delta", listener);
+      return () =>
+        ipcRenderer.removeListener("prism:batch:reconcile:delta", listener);
+    },
+    onBatchEnd: (cb: (ev: any) => void) => {
+      const listener = (_: unknown, ev: any) => cb(ev);
+      ipcRenderer.on("prism:batch:end", listener);
+      return () => ipcRenderer.removeListener("prism:batch:end", listener);
+    },
   },
 
   // Slash commands / skills discovery (v0.1.18)

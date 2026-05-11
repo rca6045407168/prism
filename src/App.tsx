@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 // gateway.ts (WS-based) is deprecated as of v0.1.9 — kept only for the
 // ChatMessage type. Chat now goes through IPC → claude CLI in main process.
-import { ChatMessage } from "./gateway";
+import { ChatMessage, BatchAgent } from "./gateway";
 import { SetupWizard } from "./SetupWizard";
 import { SettingsModal, loadSettings, saveSettings, MODEL_OPTIONS, Settings } from "./Settings";
 import { Message } from "./Message";
@@ -14,6 +14,16 @@ import {
 } from "./SlashCommandMenu";
 import { ArtifactPane } from "./ArtifactPane";
 import { ProjectManager } from "./ProjectManager";
+import {
+  Paperclip,
+  Mic,
+  Square,
+  Pin,
+  PinOff,
+  Settings as SettingsIcon,
+  Plus,
+  PanelLeft,
+} from "lucide-react";
 import { Artifact, extractArtifacts } from "./artifacts";
 import { downloadChatAsMarkdown } from "./export-chat";
 import {
@@ -659,6 +669,94 @@ export function App() {
       setMemoryPending(true);
     });
 
+    // v0.1.30: parallel batch event subscriptions. Each event updates
+    // the most recent assistant message (which we seeded with
+    // batchAgents in `send` above). The renderer paints per-agent
+    // progress live.
+    const updateAgent = (
+      index: number,
+      mutator: (a: BatchAgent) => BatchAgent,
+    ) =>
+      updateActiveMessages((prev) => {
+        if (prev.length === 0) return prev;
+        const lastIdx = prev.length - 1;
+        const last = prev[lastIdx];
+        if (last.role !== "assistant" || !last.batchAgents) return prev;
+        const agents = last.batchAgents.map((a) =>
+          a.index === index ? mutator(a) : a,
+        );
+        const next = [...prev];
+        next[lastIdx] = { ...last, batchAgents: agents };
+        return next;
+      });
+
+    const offBatchStart = window.flexhaul.chat.onBatchStart(() => {});
+    const offBatchAgentStart = window.flexhaul.chat.onBatchAgentStart((ev) => {
+      updateAgent(ev.index, (a) => ({ ...a, tier: ev.tier, status: "running" }));
+    });
+    const offBatchAgentDelta = window.flexhaul.chat.onBatchAgentDelta((ev) => {
+      updateAgent(ev.index, (a) => ({ ...a, text: a.text + ev.text }));
+    });
+    const offBatchAgentEnd = window.flexhaul.chat.onBatchAgentEnd((ev) => {
+      updateAgent(ev.index, (a) => ({
+        ...a,
+        status: "done",
+        text: ev.finalText || a.text,
+      }));
+    });
+    const offBatchAgentError = window.flexhaul.chat.onBatchAgentError((ev) => {
+      updateAgent(ev.index, (a) => ({ ...a, status: "error", error: ev.error }));
+    });
+    const offBatchReconcileStart = window.flexhaul.chat.onBatchReconcileStart(() => {
+      updateActiveMessages((prev) => {
+        if (prev.length === 0) return prev;
+        const lastIdx = prev.length - 1;
+        const last = prev[lastIdx];
+        if (last.role !== "assistant" || !last.batchAgents) return prev;
+        const next = [...prev];
+        next[lastIdx] = { ...last, reconcilerStatus: "running", reconciled: "" };
+        return next;
+      });
+    });
+    const offBatchReconcileDelta = window.flexhaul.chat.onBatchReconcileDelta(
+      (ev) => {
+        updateActiveMessages((prev) => {
+          if (prev.length === 0) return prev;
+          const lastIdx = prev.length - 1;
+          const last = prev[lastIdx];
+          if (last.role !== "assistant" || !last.batchAgents) return prev;
+          const newReconciled = (last.reconciled ?? "") + ev.text;
+          const next = [...prev];
+          // Stream reconciled into both `reconciled` (for the badge)
+          // and `text` (so ReactMarkdown renders it live below the
+          // agent cards).
+          next[lastIdx] = {
+            ...last,
+            reconciled: newReconciled,
+            text: newReconciled,
+          };
+          return next;
+        });
+      },
+    );
+    const offBatchEnd = window.flexhaul.chat.onBatchEnd((ev) => {
+      setStreaming(false);
+      updateActiveMessages((prev) => {
+        if (prev.length === 0) return prev;
+        const lastIdx = prev.length - 1;
+        const last = prev[lastIdx];
+        if (last.role !== "assistant" || !last.batchAgents) return prev;
+        const next = [...prev];
+        next[lastIdx] = {
+          ...last,
+          reconciled: ev.reconciled || last.reconciled,
+          reconcilerStatus: ev.skippedReason ? "skipped" : "done",
+          text: ev.reconciled || last.text,
+        };
+        return next;
+      });
+    });
+
     // v0.1.18: live tool-progress events. We attach them to the most
     // recent assistant message (the one currently being streamed).
     const offTool = window.flexhaul.chat.onTool((ev) => {
@@ -700,6 +798,14 @@ export function App() {
       offError();
       offPending();
       offTool();
+      offBatchStart();
+      offBatchAgentStart();
+      offBatchAgentDelta();
+      offBatchAgentEnd();
+      offBatchAgentError();
+      offBatchReconcileStart();
+      offBatchReconcileDelta();
+      offBatchEnd();
     };
   }, [activeId, updateActiveMessages]);
 
@@ -818,8 +924,42 @@ export function App() {
         setSending(false);
         return;
       }
-      toSend = `/batch\n${prompts.join("\n")}`;
+      // v0.1.30: real parallel batch. Push the user bubble + an
+      // empty assistant bubble with batchAgents seeded, then fire
+      // the dedicated sendBatch IPC. The onBatchAgent* listeners
+      // (see chat-events effect) update the assistant bubble live.
       userBubble = { role: "user", text, batch: true, batchCount: prompts.length };
+      const assistantSeed: ChatMessage = {
+        role: "assistant",
+        text: "",
+        batchAgents: prompts.map((p, i) => ({
+          index: i,
+          prompt: p,
+          status: "running",
+          text: "",
+        })),
+        reconcilerStatus: "pending",
+      };
+      updateActiveMessages((prev) => [...prev, userBubble, assistantSeed]);
+
+      const projectInstructions = activeChat?.projectId
+        ? getProject(activeChat.projectId)?.instructions ?? null
+        : null;
+      const result = await window.flexhaul.chat.sendBatch({
+        prompts,
+        model: settings.model,
+        projectInstructions,
+      });
+      if ("error" in result) {
+        updateActiveMessages((prev) => [
+          ...prev,
+          { role: "system", text: `Batch failed: ${result.error}` },
+        ]);
+      } else {
+        setStreaming(true);
+      }
+      setSending(false);
+      return;
     } else {
       toSend = buildMessageWithAttachments(text, filesAtSend);
       const displayText =
@@ -968,7 +1108,7 @@ export function App() {
             onClick={togglePinned}
             title={pinned ? "Unpin window (currently always-on-top)" : "Pin window (always-on-top)"}
           >
-            {pinned ? "📌" : "📍"}
+            {pinned ? <Pin size={14} /> : <PinOff size={14} />}
           </button>
           <button
             className="titlebar-button"
@@ -982,7 +1122,7 @@ export function App() {
                 : "Settings (⌘,)"
             }
           >
-            ⚙
+            <SettingsIcon size={14} />
             {memoryPending ? <span className="titlebar-button-dot" /> : null}
           </button>
         </div>
@@ -1245,7 +1385,7 @@ export function App() {
                     : "Attach file or image (drag-drop also works)"
                 }
               >
-                📎
+                <Paperclip size={15} strokeWidth={1.8} />
               </button>
               <button
                 className={`composer-voice${voiceRecording ? " recording" : ""}`}
@@ -1256,7 +1396,11 @@ export function App() {
                     : "Voice input (browser dictation)"
                 }
               >
-                {voiceRecording ? "●" : "🎙"}
+                {voiceRecording ? (
+                  <Square size={12} fill="currentColor" />
+                ) : (
+                  <Mic size={15} strokeWidth={1.8} />
+                )}
               </button>
               <button
                 className={`batch-toggle ${batchMode ? "active" : ""}`}
