@@ -19,7 +19,16 @@ import { spawn, type ChildProcess } from "child_process";
 import { ipcMain, BrowserWindow } from "electron";
 import * as fs from "fs";
 import { renderForInjection } from "./profile-store";
+import { recordTurnFeedback } from "./profile-feedback";
 import { enqueueExtraction } from "./profile-extractor";
+import {
+  createSnapshot,
+  listChangedFiles,
+  revertFile,
+  type SnapshotResult,
+} from "./preview-snapshot";
+import { redactDeep, redactString } from "./redact";
+import { gatherProvenance, type ProvenanceTrace } from "./provenance";
 
 const CLAUDE_BIN_CANDIDATES = [
   "/Users/richardchen/.openclaw/bin/claude",      // arm64 wrapper (preferred)
@@ -51,9 +60,34 @@ type Turn = {
   /** Echoed back to the extractor on success so it can mine stable
    *  preferences from the (user, assistant) exchange. v0.1.17. */
   userMessage: string;
+  /** v0.1.44: APFS local snapshot taken before the turn fired, when
+   *  the turn ran in Preview mode. Surfaced to the renderer on
+   *  chat:end so the user can roll back. */
+  previewSnapshot?: SnapshotResult;
+  /** v0.1.62: claim text of each profile entry that was injected into
+   *  the prompt. After the turn finishes we cosine-compare each claim
+   *  against the assistant's response to learn whether the injection
+   *  was load-bearing — that signal drives EvolveMem threshold adapt. */
+  injectedClaims?: string[];
 };
 
 const activeTurns = new Map<string, Turn>();
+
+// v0.1.37: cached MCP server status from the most recent claude-init event.
+// Lets Settings → MCP render current state without waiting for the next
+// turn. Updated on every chat:start; reset to null if a turn errors.
+export type McpServerInfo = {
+  name: string;
+  status: "connected" | "failed";
+  toolCount: number;
+};
+export type McpStatus = {
+  servers: McpServerInfo[];
+  totalTools: number;
+  mcpTools: number;
+  capturedAt: number;
+};
+let lastMcpStatus: McpStatus | null = null;
 
 function emit(window: BrowserWindow, channel: string, payload: unknown) {
   if (!window.isDestroyed()) {
@@ -161,27 +195,51 @@ function processLine(turn: Turn, line: string): void {
     turn.sessionId = parsed.session_id ?? null;
     // v0.1.15: log the init event so we can diagnose MCP availability +
     // tool count + cwd from inside the running app.
+    // v0.1.37: also cache + emit MCP server status to the renderer so
+    // Settings → MCP can render real-time connection state.
     try {
       const log = require("electron-log");
-      const mcpServers: any[] = parsed.mcp_servers ?? [];
+      const mcpServersRaw: any[] = parsed.mcp_servers ?? [];
       const tools: string[] = parsed.tools ?? [];
+      // v0.1.46: redact secrets + PII from the log payload before write.
+      // mcp server names and tool lists are usually safe but `cwd` and
+      // future fields can leak; redactDeep is cheap belt-and-suspenders.
       log.info(
         "[claude-init]",
-        JSON.stringify({
-          turnId: turn.turnId,
-          model: parsed.model,
-          cwd: parsed.cwd,
-          mcpCount: mcpServers.length,
-          mcpConnected: mcpServers
-            .filter((s: any) => s?.status === "connected")
-            .map((s: any) => s?.name),
-          mcpFailed: mcpServers
-            .filter((s: any) => s?.status !== "connected")
-            .map((s: any) => `${s?.name}=${s?.status}`),
-          toolCount: tools.length,
-          mcpToolCount: tools.filter((t) => t.startsWith("mcp__")).length,
-        }),
+        JSON.stringify(
+          redactDeep({
+            turnId: turn.turnId,
+            model: parsed.model,
+            cwd: parsed.cwd,
+            mcpCount: mcpServersRaw.length,
+            mcpConnected: mcpServersRaw
+              .filter((s: any) => s?.status === "connected")
+              .map((s: any) => s?.name),
+            mcpFailed: mcpServersRaw
+              .filter((s: any) => s?.status !== "connected")
+              .map((s: any) => `${s?.name}=${s?.status}`),
+            toolCount: tools.length,
+            mcpToolCount: tools.filter((t) => t.startsWith("mcp__")).length,
+          }),
+        ),
       );
+      const mcpServers: McpServerInfo[] = mcpServersRaw.map((s: any) => {
+        const name = String(s?.name ?? "unknown");
+        const status: McpServerInfo["status"] =
+          s?.status === "connected" ? "connected" : "failed";
+        // Count tools that match this server's name prefix.
+        const toolCount = tools.filter((t) =>
+          t.startsWith(`mcp__${name}__`),
+        ).length;
+        return { name, status, toolCount };
+      });
+      lastMcpStatus = {
+        servers: mcpServers,
+        totalTools: tools.length,
+        mcpTools: tools.filter((t) => t.startsWith("mcp__")).length,
+        capturedAt: Date.now(),
+      };
+      emit(turn.window, "prism:mcp:status", lastMcpStatus);
     } catch {
       /* logging is best-effort */
     }
@@ -209,6 +267,8 @@ function processLine(turn: Turn, line: string): void {
           toolUseId: String(b.id ?? ""),
           name: String(b.name ?? "tool"),
           inputPreview: stringifyToolInput(b.input),
+          // v0.1.39: wall-clock timestamp for the Event Stream Viewer.
+          startedAt: Date.now(),
         });
       }
     }
@@ -273,12 +333,33 @@ function processLine(turn: Turn, line: string): void {
         turn.finalText = parsed.result;
         emit(turn.window, "prism:chat:delta", { turnId: turn.turnId, text: delta });
       }
+      // v0.1.34: surface token usage to the renderer so the assistant
+      // bubble can show "Haiku · 1.2k in · 340 out · $0.0008" and the
+      // titlebar can aggregate a session total.
+      const usage = parsed.usage ?? {};
       emit(turn.window, "prism:chat:end", {
         turnId: turn.turnId,
         finalText: turn.finalText,
         sessionId: turn.sessionId,
         durationMs: parsed.duration_ms,
         cost: parsed.total_cost_usd,
+        inputTokens:
+          (usage.input_tokens ?? 0) +
+          (usage.cache_read_input_tokens ?? 0) +
+          (usage.cache_creation_input_tokens ?? 0),
+        outputTokens: usage.output_tokens ?? 0,
+        cacheReadTokens: usage.cache_read_input_tokens ?? 0,
+        model: parsed.model ?? null,
+        // v0.1.44: when turn ran in Preview mode, ship the snapshot
+        // metadata to the renderer so it can show the "Review changes"
+        // affordance + the tmutil restore instructions.
+        previewSnapshot: turn.previewSnapshot
+          ? {
+              id: turn.previewSnapshot.id,
+              fullName: turn.previewSnapshot.fullName,
+              createdAt: turn.previewSnapshot.createdAt,
+            }
+          : undefined,
       });
 
       // v0.1.17: kick off background profile extraction. Fire-and-forget
@@ -291,6 +372,18 @@ function processLine(turn: Turn, line: string): void {
         });
       } catch {
         /* ignore */
+      }
+      // v0.1.62: EvolveMem feedback — record which injected claims
+      // actually "landed" in the assistant response. Fire-and-forget;
+      // it adapts thresholds based on the running average.
+      if (turn.injectedClaims && turn.injectedClaims.length > 0 && turn.finalText) {
+        recordTurnFeedback({
+          turnId: turn.turnId,
+          injectedClaims: turn.injectedClaims,
+          assistantResponse: turn.finalText,
+        }).catch(() => {
+          /* ignore — feedback is opportunistic */
+        });
       }
       // Notify renderer that a profile update may be pending — the gear
       // icon shows a tiny dot until the user opens Memory.
@@ -307,6 +400,15 @@ async function send(params: {
   /** Project-level instructions injected as a system-prompt prefix,
    *  ahead of the auto-profile. v0.1.29. */
   projectInstructions?: string | null;
+  /** v0.1.41/v0.1.44: permission mode for claude CLI.
+   *  - "ask" → `--permission-mode plan`: claude reads + proposes but
+   *    never executes destructive tools. Safe default. See MST-060.
+   *  - "preview" (v0.1.44) → take APFS local snapshot of /, then run
+   *    claude with bypassPermissions. Post-turn snapshot ID surfaced
+   *    to renderer so user can review/revert.
+   *  - "bypass" → `--permission-mode bypassPermissions` +
+   *    `--allow-dangerously-skip-permissions`: full trust, no snapshot. */
+  permissionMode?: "ask" | "preview" | "bypass";
   window: BrowserWindow;
 }): Promise<{ turnId: string } | { error: string }> {
   const claudeBin = findClaudeBin();
@@ -328,8 +430,18 @@ async function send(params: {
     // cloud MCPs (Gmail, Calendar, Drive, etc.) that come from default
     // settings. Letting claude use its default config-discovery makes the
     // spawned process inherit the same MCP servers as the terminal does.
-    "--permission-mode", "bypassPermissions",
-    "--allow-dangerously-skip-permissions",
+    //
+    // v0.1.41/v0.1.44: permission mode comes from settings (MST-060).
+    //   "ask"      → plan mode (read + propose, no execute)
+    //   "preview"  → take APFS snapshot, then bypassPermissions
+    //   "bypass"   → full trust, no snapshot
+    // The snapshot for "preview" mode is taken in the async wrapper
+    // below (createSnapshot is async); claude itself runs with
+    // bypassPermissions for both "preview" and "bypass" — the snapshot
+    // is the only delta between them at the CLI-args level.
+    ...(params.permissionMode === "ask"
+      ? ["--permission-mode", "plan"]
+      : ["--permission-mode", "bypassPermissions", "--allow-dangerously-skip-permissions"]),
   ];
   // v0.1.21: real auto-routing. "Auto" goes through the heuristic
   // router; explicit picks pass through unchanged. We log which tier
@@ -340,13 +452,16 @@ async function send(params: {
     routedModel = routeModel(params.message);
     args.push("--model", routedModel);
     try {
+      // v0.1.46: redact the 80-char message preview before logging.
+      // Users frequently paste secrets/PII into the composer — the
+      // log shouldn't replay them.
       require("electron-log").info(
         "[auto-route]",
         JSON.stringify({
           turnId,
           tier: routedModel,
           messageLen: params.message.length,
-          messagePreview: params.message.slice(0, 80),
+          messagePreview: redactString(params.message.slice(0, 80)),
         }),
       );
     } catch {
@@ -391,9 +506,51 @@ async function send(params: {
   // model load) it falls back to lexical scoring — same path as
   // v0.1.22. Profile injection is the only thing that's awaited; the
   // rest of the spawn flow stays sync.
-  const profileBlock = await renderForInjection(params.message);
+  // v0.1.62: capture injected claims for EvolveMem feedback loop.
+  const injectedClaimsForFeedback: string[] = [];
+  const profileBlock = await renderForInjection(
+    params.message,
+    injectedClaimsForFeedback,
+  );
   if (profileBlock) {
     args.push("--append-system-prompt", profileBlock);
+  }
+
+  // v0.1.65: action-priming. When the user's message reads like an
+  // explicit approval to execute a previously-proposed plan
+  // ("approved", "go ahead", "execute end-to-end", "do it", "yes do
+  // that"), prepend a behavioral instruction: ACT, don't re-propose.
+  // Symptom this fixes: Richard typed "Approved. Execute the plan you
+  // just proposed above. Run end-to-end." and Prism wrote out the same
+  // list-of-steps again instead of running them. Senior-employee fail.
+  const APPROVAL_PATTERNS = [
+    /^\s*approved\b/i,
+    /\bexecute (the )?plan\b/i,
+    /\bgo ahead\b/i,
+    /\brun (?:it|the operations|end-to-end)\b/i,
+    /\b(?:please )?do (?:it|that|the thing)\b/i,
+    /^\s*yes(?:,? do that)?\.?\s*$/i,
+    /\bproceed\b.*\bexecute/i,
+    /\bapproved\b.*\b(?:execute|run|proceed)/i,
+  ];
+  const looksLikeApproval = APPROVAL_PATTERNS.some((re) =>
+    re.test(params.message),
+  );
+  if (looksLikeApproval) {
+    args.push(
+      "--append-system-prompt",
+      `<!-- Prism action-priming (v0.1.65): the user's message reads as an explicit approval of your previous plan. -->
+
+You previously proposed a plan and the user just approved it explicitly. Your job this turn is to EXECUTE, not re-state the plan.
+
+Rules:
+1. Do NOT re-list the steps you already proposed.
+2. Run the operations using the tools available (Bash, Edit, Write, MCP servers).
+3. If a step genuinely requires the user to do it (web portal, macOS Privacy settings, hardware), say so ONCE and OPEN the relevant pane via \`open\` (e.g. \`open "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"\` for Screen Recording, \`open "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"\` for Accessibility). Do not repeat verbatim instructions you've already given.
+4. If you genuinely cannot do anything more from your side, say "Done from my side — over to you for the X step" and STOP. Do not pad with another walkthrough.
+
+Prefer action over advice. The user has already read your plan.`,
+    );
   }
 
   // Write the message via stdin? No — claude --print takes the prompt as
@@ -426,6 +583,41 @@ async function send(params: {
     .filter(Boolean)
     .join(":");
 
+  // v0.1.44: Preview mode — take an APFS local snapshot of /
+  // BEFORE spawning claude. Cost: ~1-2s; surfaces post-turn so the
+  // user can revert via tmutil restore if anything went wrong. See
+  // MST-060/MST-061 + the v0.1.44 design note in the vault.
+  let previewSnapshot: SnapshotResult | undefined;
+  if (params.permissionMode === "preview") {
+    try {
+      previewSnapshot = await createSnapshot();
+      try {
+        require("electron-log").info(
+          "[preview-snapshot]",
+          JSON.stringify({ turnId, snapshot: previewSnapshot.fullName }),
+        );
+      } catch {
+        /* logging is best-effort */
+      }
+    } catch (e: any) {
+      // Snapshot failure should NOT block the turn — degrade gracefully
+      // to bypass-without-snapshot rather than refusing to run. Emit a
+      // system message so the user knows safety net wasn't established.
+      emit(params.window, "prism:chat:start", {
+        turnId,
+        sessionId: params.sessionId ?? null,
+        model: routedModel ?? params.model ?? "auto",
+      });
+      emit(params.window, "prism:chat:delta", {
+        turnId,
+        text:
+          `⚠ Preview snapshot failed (${e?.message ?? "unknown error"}). ` +
+          `Falling through to Bypass for this turn — changes will not be reversible. ` +
+          `Consider switching to Ask mode in Settings until the snapshot issue is resolved.\n\n`,
+      });
+    }
+  }
+
   let proc: ChildProcess;
   try {
     proc = spawn(claudeBin, args, {
@@ -454,6 +646,8 @@ async function send(params: {
     errored: false,
     aborted: false,
     userMessage: params.message,
+    previewSnapshot,
+    injectedClaims: injectedClaimsForFeedback,
   };
   activeTurns.set(turnId, turn);
 
@@ -524,6 +718,102 @@ function abort(turnId: string): { ok: boolean } {
 }
 
 /**
+ * Auto-title (v0.1.33) — fire a tiny one-shot haiku call after a chat's
+ * first exchange to summarize the user's opener into a 3-6 word title.
+ *
+ * Why not just truncate the first user message: a 60-char prefix of "i'm
+ * trying to figure out why my postgres replication keeps dying after the
+ * 2am vacuum and i think it's because" is useless in a sidebar. We want
+ * "Postgres replication 2am crash" so users can scan history.
+ *
+ * Fire-and-forget on the caller side. Best-effort; if the call fails we
+ * leave the existing title alone — the renderer's local `autoTitle` already
+ * gives us a usable fallback from the first user message.
+ *
+ * Uses `--print` without stream-json so we just get the final text on
+ * stdout. No --resume (we want a clean haiku context, not the user's
+ * actual chat session). 10s hard timeout.
+ */
+async function generateTitle(userMessage: string, assistantPreview: string): Promise<string> {
+  const claudeBin = findClaudeBin();
+  if (!claudeBin) return "";
+
+  const prompt = [
+    "Summarize the following chat exchange into a 3-6 word title.",
+    "No quotes, no trailing punctuation, no markdown. Title Case.",
+    "If the user is asking a question, the title should be a noun phrase",
+    "describing the topic, not the question itself.",
+    "",
+    `User: ${userMessage.slice(0, 600)}`,
+    "",
+    `Assistant: ${assistantPreview.slice(0, 400)}`,
+    "",
+    "Title:",
+  ].join("\n");
+
+  const HOME = process.env.HOME ?? "";
+  const augmentedPath = [
+    `${HOME}/.openclaw/bin`,
+    `${HOME}/.local/bin`,
+    `${HOME}/.npm-global/bin`,
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+    process.env.PATH ?? "",
+    "/usr/bin",
+    "/bin",
+  ].filter(Boolean).join(":");
+
+  return new Promise<string>((resolve) => {
+    let settled = false;
+    let proc: ChildProcess;
+    try {
+      proc = spawn(
+        claudeBin,
+        ["--print", "--model", "haiku", "--permission-mode", "bypassPermissions", prompt],
+        {
+          stdio: ["ignore", "pipe", "pipe"],
+          cwd: HOME || undefined,
+          env: { ...process.env, PATH: augmentedPath },
+        },
+      );
+    } catch {
+      resolve("");
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      try { proc.kill("SIGTERM"); } catch { /* ignore */ }
+      resolve("");
+    }, 10_000);
+
+    let out = "";
+    proc.stdout?.on("data", (chunk: Buffer) => {
+      out += chunk.toString();
+    });
+    proc.on("close", () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      // claude --print returns plain text; trim, strip quotes, cap length
+      const cleaned = out
+        .trim()
+        .replace(/^["'`]+|["'`]+$/g, "")
+        .replace(/\s+/g, " ")
+        .slice(0, 60);
+      resolve(cleaned);
+    });
+    proc.on("error", () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve("");
+    });
+  });
+}
+
+/**
  * True parallel batch (v0.1.30) — finally honors Prism's tagline.
  *
  * Before this: `/batch` was a SKILL inside a single claude turn.
@@ -562,17 +852,30 @@ type Batch = {
   agents: BatchAgent[];
   reconcilerProc: ChildProcess | null;
   aborted: boolean;
+  /** v0.1.36: "batch" = N different prompts → synthesize per-prompt
+   *  headings. "think" = N copies of the same prompt → reranker picks
+   *  the best single answer. Pattern lifted from optillm's best-of-N. */
+  mode: "batch" | "think";
+  /** Original prompt for /think mode — shown in the UI instead of
+   *  "Attempt 1 / Attempt 2 / ..." labels. */
+  thinkPrompt?: string;
 };
 
 const activeBatches = new Map<string, Batch>();
 
-function buildBaseArgs(model: string | null): string[] {
+function buildBaseArgs(
+  model: string | null,
+  permissionMode: "ask" | "bypass" = "ask",
+): string[] {
   const args = [
     "--print",
     "--output-format", "stream-json",
     "--verbose",
-    "--permission-mode", "bypassPermissions",
-    "--allow-dangerously-skip-permissions",
+    // v0.1.41: permission mode honors the renderer setting. Default
+    // "ask" → plan (read + propose only). See MST-060.
+    ...(permissionMode === "bypass"
+      ? ["--permission-mode", "bypassPermissions", "--allow-dangerously-skip-permissions"]
+      : ["--permission-mode", "plan"]),
   ];
   if (model) args.push("--model", model);
   return args;
@@ -616,6 +919,14 @@ function sendBatch(params: {
   model?: string;
   projectInstructions?: string | null;
   window: BrowserWindow;
+  /** v0.1.36: "think" mode uses N copies of the same prompt + a
+   *  reranker reconciler. The default "batch" mode keeps the old
+   *  N-different-prompts-with-per-prompt-headings behavior. */
+  mode?: "batch" | "think";
+  thinkPrompt?: string;
+  /** v0.1.41: permission mode threaded through to each batch agent
+   *  + the haiku reconciler. See MST-060. */
+  permissionMode?: "ask" | "bypass";
 }): { batchId: string } | { error: string } {
   const claudeBin = findClaudeBin();
   if (!claudeBin) {
@@ -645,6 +956,8 @@ function sendBatch(params: {
     agents,
     reconcilerProc: null,
     aborted: false,
+    mode: params.mode ?? "batch",
+    thinkPrompt: params.thinkPrompt,
   };
   activeBatches.set(batchId, batch);
 
@@ -662,7 +975,7 @@ function sendBatch(params: {
       params.model && params.model !== "auto"
         ? params.model
         : routeModel(agent.prompt);
-    const baseArgs = buildBaseArgs(tier);
+    const baseArgs = buildBaseArgs(tier, params.permissionMode);
     if (projectBlock) {
       baseArgs.push(
         "--append-system-prompt",
@@ -797,19 +1110,65 @@ function maybeStartReconciler(
     return;
   }
 
-  // Build the reconciler prompt
-  const sections = successful
-    .map(
-      (a) =>
-        `### Prompt ${a.index + 1}: ${a.prompt}\n\nAgent ${a.index + 1} answered:\n${a.finalText.trim()}`,
-    )
-    .join("\n\n---\n\n");
+  // v0.1.65: degenerate-case fast-path. When only ONE agent succeeded,
+  // there's nothing to reconcile — pass the agent's answer through
+  // directly. Saves a Haiku call + ~1-3s + tokens. Previously a 1-prompt
+  // fan-out wastefully ran the reconciler on a single answer (visible in
+  // the v0.1.64 UX as "Reconciling with Haiku…" → near-identical output).
+  if (successful.length === 1) {
+    emit(batch.window, "prism:batch:reconcile:start", { batchId: batch.batchId });
+    emit(batch.window, "prism:batch:reconcile:delta", {
+      batchId: batch.batchId,
+      text: successful[0].finalText,
+    });
+    emit(batch.window, "prism:batch:end", {
+      batchId: batch.batchId,
+      reconciled: successful[0].finalText,
+      skippedReason: "single-agent batch — reconciler bypassed",
+    });
+    activeBatches.delete(batch.batchId);
+    return;
+  }
 
-  const reconcilerPrompt = `You are a reconciler. ${successful.length} parallel agents each answered a different prompt. Summarize their answers into a single coherent reply that addresses every prompt in order. Format with ## headings per prompt. Be concise — assume the agent answers are already correct; your job is presentation, not re-reasoning.
+  // v0.1.36: branch by batch mode. Two distinct reconcilers:
+  //   - "batch": N different prompts → unified per-prompt headings
+  //   - "think": N copies of the SAME prompt → reranker picks the
+  //             best single answer (optillm-style best-of-N).
+  let reconcilerPrompt: string;
+  if (batch.mode === "think") {
+    const attempts = successful
+      .map(
+        (a, i) =>
+          `### Attempt ${i + 1}\n${a.finalText.trim()}`,
+      )
+      .join("\n\n---\n\n");
+    reconcilerPrompt = `You are an answer-reranker. Below are ${successful.length} independent attempts at the SAME question, each generated by Claude with full reasoning. Your job: produce the SINGLE BEST answer by combining the strongest parts of each attempt.
+
+Rules:
+1. Prefer accuracy. If attempts disagree on a fact, pick the version with concrete justification; if you can't tell, flag the disagreement in one short line.
+2. Prefer clarity. Use the cleanest explanation across attempts.
+3. Do NOT mention that there were multiple attempts. Do NOT add a meta-preamble. Just answer the original question.
+4. Keep the formatting natural — markdown is fine, but only if the attempts used it.
+
+Original question:
+${batch.thinkPrompt ?? successful[0].prompt}
+
+${attempts}
+
+Produce the unified answer now. No preamble, no meta-commentary.`;
+  } else {
+    const sections = successful
+      .map(
+        (a) =>
+          `### Prompt ${a.index + 1}: ${a.prompt}\n\nAgent ${a.index + 1} answered:\n${a.finalText.trim()}`,
+      )
+      .join("\n\n---\n\n");
+    reconcilerPrompt = `You are a reconciler. ${successful.length} parallel agents each answered a different prompt. Summarize their answers into a single coherent reply that addresses every prompt in order. Format with ## headings per prompt. Be concise — assume the agent answers are already correct; your job is presentation, not re-reasoning.
 
 ${sections}
 
 Render the unified response now. No preamble.`;
+  }
 
   emit(batch.window, "prism:batch:reconcile:start", { batchId: batch.batchId });
 
@@ -907,16 +1266,140 @@ function abortBatch(batchId: string): { ok: boolean } {
   return { ok: true };
 }
 
+/**
+ * v0.1.57: Grounded Provenance — build a context block from a trace and
+ * prepend it to the user message before the LLM ever sees the prompt.
+ * The model can now cite directly from vault notes rather than guess
+ * what your private knowledge says.
+ *
+ * Cap to ~3 hits + each peek truncated, so we stay well under the
+ * model's context window. The display panel still shows the full
+ * trace; the LLM gets the compressed version.
+ */
+function buildGroundingBlock(trace: ProvenanceTrace): string {
+  const hits = trace.vaultHits.slice(0, 3);
+  const commitCount = (trace.commitmentHits ?? []).length;
+  if (hits.length === 0 && trace.memoryHits.length === 0 && commitCount === 0)
+    return "";
+  const lines: string[] = [
+    "[Prism loaded the following context from Richard's Obsidian vault + memory + past commitments. Treat as authoritative when relevant; cite vault notes as [[Note Title]] when you use them.]",
+  ];
+  for (const h of hits) {
+    const peek = h.snippet.replace(/\s+/g, " ").slice(0, 360);
+    lines.push("");
+    lines.push(
+      `### [[${h.title}]] (${h.relPath}) — relevance ${Math.round(h.score * 100)}%${
+        h.source === "graph-walk"
+          ? ` — reached via ${h.pathFromQuery.join(" → ")}`
+          : ""
+      }`,
+    );
+    lines.push(peek);
+  }
+  if (trace.memoryHits.length > 0) {
+    lines.push("");
+    lines.push("[Relevant memory entries:]");
+    for (const m of trace.memoryHits.slice(0, 3)) {
+      lines.push(`- (${m.type}) ${m.title} — ${m.why.slice(0, 160)}`);
+    }
+  }
+  // v0.1.58: feed resolved commitments + outcomes into the prompt so the
+  // LLM can warn / recall: "you committed to this same thing on date X
+  // — outcome: shipped late". The wins/losses feedback loop.
+  const resolvedCommits = (trace.commitmentHits ?? []).filter((h) => h.resolved);
+  const openCommits = (trace.commitmentHits ?? []).filter((h) => !h.resolved);
+  if (resolvedCommits.length > 0) {
+    lines.push("");
+    lines.push(
+      "[Past resolved commitments on similar topics — read these before promising anything new:]",
+    );
+    for (const c of resolvedCommits.slice(0, 3)) {
+      const date = c.capturedAt
+        ? new Date(c.capturedAt).toISOString().slice(0, 10)
+        : "earlier";
+      const outcome = c.outcome ? ` → outcome: ${c.outcome.slice(0, 140)}` : "";
+      lines.push(`- ${date}: ${c.text.slice(0, 140)}${outcome}`);
+    }
+  }
+  if (openCommits.length > 0) {
+    lines.push("");
+    lines.push(
+      "[Open (unresolved) commitments on similar topics — track or close before adding new ones:]",
+    );
+    for (const c of openCommits.slice(0, 2)) {
+      const date = c.capturedAt
+        ? new Date(c.capturedAt).toISOString().slice(0, 10)
+        : "earlier";
+      lines.push(`- ${date}: ${c.text.slice(0, 140)}`);
+    }
+  }
+  lines.push("");
+  lines.push("---");
+  lines.push("");
+  return lines.join("\n");
+}
+
 export function registerClaudeClient(getWindow: () => BrowserWindow | null) {
-  ipcMain.handle("prism:chat:send", (_e, params: {
+  ipcMain.handle("prism:chat:send", async (_e, params: {
     message: string;
     model?: string;
     sessionId?: string | null;
     projectInstructions?: string | null;
+    permissionMode?: "ask" | "bypass";
   }) => {
     const window = getWindow();
     if (!window) return { error: "no window" };
-    return send({ ...params, window });
+
+    // v0.1.57: Grounded Provenance. Gather the trace BEFORE we spawn
+    // claude, with a 2.5s budget so the chat path stays snappy. On
+    // success, inject the top hits as a context block; the LLM grounds
+    // its answer in real vault content. On timeout, send unmodified —
+    // the display-only trace will still attach asynchronously below.
+    let trace: ProvenanceTrace | null = null;
+    try {
+      const tracePromise = gatherProvenance({
+        turnId: "pending",
+        queryText: params.message,
+      });
+      const t = await Promise.race([
+        tracePromise.then((tr) => ({ ok: true as const, tr })),
+        new Promise<{ ok: false }>((resolve) =>
+          setTimeout(() => resolve({ ok: false }), 2500),
+        ),
+      ]);
+      if (t.ok) trace = t.tr;
+    } catch {
+      /* non-fatal */
+    }
+
+    const groundedMessage =
+      trace && trace.vaultHits.length > 0
+        ? buildGroundingBlock(trace) + params.message
+        : params.message;
+
+    const result = await send({
+      ...params,
+      message: groundedMessage,
+      window,
+    });
+
+    // Emit the trace via a dedicated channel keyed by turnId so the
+    // renderer can attach it to the assistant bubble without doing its
+    // own redundant gather.
+    if ("turnId" in result && trace) {
+      const stamped: ProvenanceTrace = { ...trace, turnId: result.turnId };
+      try {
+        if (!window.isDestroyed())
+          window.webContents.send("prism:provenance:trace", {
+            turnId: result.turnId,
+            trace: stamped,
+          });
+      } catch {
+        /* renderer may have gone away */
+      }
+    }
+
+    return result;
   });
 
   ipcMain.handle("prism:chat:abort", (_e, params: { turnId: string }) => {
@@ -931,6 +1414,7 @@ export function registerClaudeClient(getWindow: () => BrowserWindow | null) {
       prompts: string[];
       model?: string;
       projectInstructions?: string | null;
+      permissionMode?: "ask" | "bypass";
     }) => {
       const window = getWindow();
       if (!window) return { error: "no window" };
@@ -941,8 +1425,83 @@ export function registerClaudeClient(getWindow: () => BrowserWindow | null) {
     return abortBatch(params.batchId);
   });
 
+  // v0.1.36: /think — best-of-N inference-time technique (optillm pattern).
+  // N copies of the same prompt fan out in parallel; a haiku reranker
+  // produces the single best unified answer.
+  ipcMain.handle(
+    "prism:chat:sendThink",
+    (_e, params: {
+      prompt: string;
+      attempts?: number;
+      model?: string;
+      projectInstructions?: string | null;
+      permissionMode?: "ask" | "bypass";
+    }) => {
+      const window = getWindow();
+      if (!window) return { error: "no window" };
+      const n = Math.max(2, Math.min(5, params.attempts ?? 3));
+      const prompts = Array.from({ length: n }, () => params.prompt);
+      return sendBatch({
+        prompts,
+        model: params.model,
+        projectInstructions: params.projectInstructions,
+        window,
+        mode: "think",
+        thinkPrompt: params.prompt,
+        permissionMode: params.permissionMode,
+      });
+    },
+  );
+
   ipcMain.handle("prism:chat:probe", () => {
     const bin = findClaudeBin();
     return { found: !!bin, path: bin };
   });
+
+  // v0.1.37: MCP server status — cached from the last claude-init event.
+  // Returns null if no turn has fired yet (renderer should show "send a
+  // turn to discover MCP servers" hint in that case).
+  ipcMain.handle("prism:mcp:status", () => {
+    return lastMcpStatus;
+  });
+
+  // v0.1.33: fire-and-forget title generation after first chat exchange.
+  ipcMain.handle(
+    "prism:chat:generateTitle",
+    async (_e, params: { userMessage: string; assistantPreview: string }) => {
+      const title = await generateTitle(params.userMessage, params.assistantPreview);
+      return { title };
+    },
+  );
+
+  // v0.1.45: Preview-mode diff + revert IPCs.
+  // listChangedFiles returns files modified/created after the given
+  // snapshot was taken, scoped to $HOME (or v0.1.48 user scope), filtered.
+  ipcMain.handle(
+    "prism:preview:listChanged",
+    async (_e, params: { snapshotId: string; scope?: string }) => {
+      try {
+        const files = await listChangedFiles(
+          params.snapshotId,
+          params.scope || undefined,
+        );
+        return { files };
+      } catch (e: any) {
+        return { error: e?.message ?? String(e) };
+      }
+    },
+  );
+
+  // revertFile deletes a specific file. Refuses paths outside $HOME.
+  ipcMain.handle(
+    "prism:preview:revertFile",
+    async (_e, params: { path: string }) => {
+      try {
+        await revertFile(params.path);
+        return { ok: true };
+      } catch (e: any) {
+        return { ok: false, error: e?.message ?? String(e) };
+      }
+    },
+  );
 }

@@ -27,6 +27,13 @@ type Props = {
   onToggle: () => void;
   searchQuery: string;
   onSearchChange: (q: string) => void;
+  /** v0.1.33: id of the chat currently streaming a turn — draws a pulse
+   *  dot on that row so the user can see progress while scrolling around. */
+  streamingChatId?: string | null;
+  /** v0.1.40: map of chatId → vault relPath for chats that have been
+   *  saved to Obsidian via ⌘⇧S. Renders a small "saved" indicator next
+   *  to the chat title so the user can tell at a glance what's archived. */
+  savedToVault?: Record<string, string>;
 };
 
 export function Sidebar({
@@ -46,6 +53,8 @@ export function Sidebar({
   onToggle,
   searchQuery,
   onSearchChange,
+  streamingChatId,
+  savedToVault,
 }: Props) {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
@@ -144,12 +153,23 @@ export function Sidebar({
 
       <div className="sidebar-list">
         {chats.length === 0 && (
-          <div className="sidebar-empty">No chats yet. Start one with the + button above.</div>
+          <div className="sidebar-empty">
+            <div className="sidebar-empty-title">No chats yet</div>
+            <div className="sidebar-empty-sub">
+              Start one with <kbd>⌘N</kbd> — or open the command palette with{" "}
+              <kbd>⌘K</kbd>.
+            </div>
+            <button className="sidebar-empty-cta" onClick={onNewChat}>
+              <Plus size={12} strokeWidth={2.5} /> New chat
+            </button>
+          </div>
         )}
         {chats.map((chat) => (
           <div
             key={chat.id}
-            className={`sidebar-item ${chat.id === activeId ? "active" : ""}`}
+            className={`sidebar-item ${chat.id === activeId ? "active" : ""}${
+              chat.id === streamingChatId ? " streaming" : ""
+            }`}
             onClick={() => {
               if (renamingId !== chat.id) onSelect(chat.id);
             }}
@@ -168,7 +188,20 @@ export function Sidebar({
                 onClick={(e) => e.stopPropagation()}
               />
             ) : (
-              <div className="sidebar-item-title">{chat.title}</div>
+              <div className="sidebar-item-title">
+                {chat.id === streamingChatId && (
+                  <span className="sidebar-stream-dot" title="Streaming…" />
+                )}
+                {chat.title}
+                {savedToVault?.[chat.id] ? (
+                  <span
+                    className="sidebar-vault-badge"
+                    title={`Saved to vault → ${savedToVault[chat.id]}`}
+                  >
+                    ◆
+                  </span>
+                ) : null}
+              </div>
             )}
             <div className="sidebar-item-meta">
               <span>{chat.messages.length} {chat.messages.length === 1 ? "msg" : "msgs"}</span>

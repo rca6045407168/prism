@@ -13,6 +13,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { Artifact } from "./artifacts";
+import { copyToClipboard } from "./clipboard";
 
 type Props = {
   artifact: Artifact;
@@ -24,11 +25,7 @@ export function ArtifactPane({ artifact, onClose }: Props) {
   const [allowScripts, setAllowScripts] = useState(false);
 
   const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(artifact.content);
-    } catch {
-      /* ignore */
-    }
+    await copyToClipboard(artifact.content);
   };
 
   return (

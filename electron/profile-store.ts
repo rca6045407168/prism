@@ -278,6 +278,39 @@ const FULL_DIM_ORDER: Dimension[] = [
 
 const RELEVANCE_LINE_BUDGET = 12;
 
+/**
+ * v0.1.36: SURE-RAG-inspired sufficiency gates. If the BEST relevance
+ * candidate scores below these thresholds, we abstain — render only
+ * always-on dimensions, no relevance block. Better silence than noise.
+ *
+ * Calibration:
+ *  - cosine 0.18-0.22 is "borderline" on MiniLM-L6-v2; below 0.22 is
+ *    statistically indistinguishable from unrelated documents.
+ *  - lexical > 0 means at least one stem-shared token; require > 0.5
+ *    so we have real overlap, not a single accidental word match.
+ */
+const SUFFICIENCY_THRESHOLD_COSINE = 0.22;
+const SUFFICIENCY_THRESHOLD_LEXICAL = 0.5;
+
+// v0.1.62: EvolveMem — pull adapted thresholds from feedback module.
+// Falls back to the defaults above if the module errors. Bounds are
+// enforced inside profile-feedback so we never escape sanity.
+import { getAdaptedThresholds } from "./profile-feedback";
+function effectiveCosineThreshold(): number {
+  try {
+    return getAdaptedThresholds().cosine;
+  } catch {
+    return SUFFICIENCY_THRESHOLD_COSINE;
+  }
+}
+function effectiveLexicalThreshold(): number {
+  try {
+    return getAdaptedThresholds().lexical;
+  } catch {
+    return SUFFICIENCY_THRESHOLD_LEXICAL;
+  }
+}
+
 /** Lowercase tokenize, drop short noise words. */
 function tokenize(text: string): Set<string> {
   const out = new Set<string>();
@@ -379,12 +412,20 @@ function embeddingCoverage(profile: Profile): {
  *  silently uses lexical, which is correct. */
 const EMBED_QUERY_TIMEOUT_MS = 200;
 
-export async function renderForInjection(userMessage?: string): Promise<string> {
+export async function renderForInjection(
+  userMessage?: string,
+  // v0.1.62: optional out-array — caller pushes injected claim text into it
+  // for the EvolveMem feedback loop. Untouched if omitted (backwards-compat).
+  injectedOut?: string[],
+): Promise<string> {
   const p = loadProfile();
   if (p.entries.length === 0) return "";
 
   const filtered = typeof userMessage === "string" && userMessage.trim().length > 0;
   const lines: string[] = [];
+  const recordClaim = (text: string) => {
+    if (injectedOut) injectedOut.push(text);
+  };
 
   if (!filtered) {
     // Static mode — keep legacy behavior.
@@ -398,6 +439,7 @@ export async function renderForInjection(userMessage?: string): Promise<string> 
       for (const it of items) {
         const claim = it.claim.length > 140 ? it.claim.slice(0, 137) + "…" : it.claim;
         lines.push(`- ${claim}`);
+        recordClaim(it.claim);
       }
     }
   } else {
@@ -414,6 +456,7 @@ export async function renderForInjection(userMessage?: string): Promise<string> 
       for (const it of items) {
         const claim = it.claim.length > 140 ? it.claim.slice(0, 137) + "…" : it.claim;
         lines.push(`- ${claim}`);
+        recordClaim(it.claim);
       }
     }
 
@@ -479,30 +522,76 @@ export async function renderForInjection(userMessage?: string): Promise<string> 
             b.entry.added_at.localeCompare(a.entry.added_at),
         );
 
+      // v0.1.36: SURE-RAG-inspired sufficiency gate. If even the BEST
+      // relevance candidate has a weak score, the joint evidence is
+      // unlikely to cover the question — abstain from injecting the
+      // relevance block entirely. The always-on dimensions
+      // (anti_patterns + communication_style) stay in scope.
+      const topScore = candidates[0]?.score ?? 0;
+      // v0.1.62: use adapted threshold from EvolveMem feedback loop.
+      const sufficiencyThreshold =
+        scoringMode === "embedding"
+          ? effectiveCosineThreshold()
+          : effectiveLexicalThreshold();
+      const sufficiencyPassed = topScore >= sufficiencyThreshold;
+
+      // v0.1.36: BRIGHT-Pro-inspired evidence portfolio. The naive
+      // top-k-by-score loop the previous version used can fill the
+      // entire budget with 4 entries from the same dimension when the
+      // user's question lexically overlaps one cluster — exactly the
+      // failure mode BRIGHT-Pro flagged ("retrievers trained for top-k
+      // similarity fail in agentic loops where each step needs
+      // complementary evidence, not more of the same"). Replace with
+      // a two-pass selection:
+      //   PASS 1 (portfolio): top-1 per dimension by score
+      //   PASS 2 (fill):       remaining budget by score, allowing
+      //                        seconds/thirds from already-covered dims
+      // Guarantees coverage when ≥2 dimensions have a viable candidate.
+      const byDim = new Map<Dimension, ProfileEntry[]>();
+      let kept = 0;
+      let portfolioDimsCovered = 0;
+      if (sufficiencyPassed) {
+        const claimed = new Set<string>();
+        // PASS 1: one per dimension
+        const dimSeen = new Set<Dimension>();
+        for (const { entry } of candidates) {
+          if (kept >= remaining) break;
+          if (dimSeen.has(entry.dimension)) continue;
+          dimSeen.add(entry.dimension);
+          claimed.add(entry.id);
+          const list = byDim.get(entry.dimension) ?? [];
+          list.push(entry);
+          byDim.set(entry.dimension, list);
+          kept += 1;
+          portfolioDimsCovered += 1;
+        }
+        // PASS 2: fill remaining budget by score, skipping already-picked
+        for (const { entry } of candidates) {
+          if (kept >= remaining) break;
+          if (claimed.has(entry.id)) continue;
+          claimed.add(entry.id);
+          const list = byDim.get(entry.dimension) ?? [];
+          list.push(entry);
+          byDim.set(entry.dimension, list);
+          kept += 1;
+        }
+      }
+
       try {
         log.info(
           "[profile-render]",
           JSON.stringify({
             mode: scoringMode,
             pool: relevancePool.length,
-            kept: Math.min(candidates.length, remaining),
-            topScore: candidates[0]?.score ?? 0,
+            kept,
+            topScore,
+            sufficiencyPassed,
+            sufficiencyThreshold,
+            portfolioDimsCovered,
           }),
         );
       } catch {
         /* logging is best-effort */
-      }
-
-      // Group surviving candidates back by dimension to render under
-      // headers, preserving the ranking inside each group.
-      const byDim = new Map<Dimension, ProfileEntry[]>();
-      let kept = 0;
-      for (const { entry } of candidates) {
-        if (kept >= remaining) break;
-        const list = byDim.get(entry.dimension) ?? [];
-        list.push(entry);
-        byDim.set(entry.dimension, list);
-        kept += 1;
       }
       for (const d of RELEVANCE_DIM_ORDER) {
         const items = byDim.get(d);
@@ -511,6 +600,7 @@ export async function renderForInjection(userMessage?: string): Promise<string> 
         for (const it of items) {
           const claim = it.claim.length > 140 ? it.claim.slice(0, 137) + "…" : it.claim;
           lines.push(`- ${claim}`);
+          recordClaim(it.claim);
         }
       }
     }
