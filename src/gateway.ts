@@ -24,6 +24,12 @@ export type ToolEvent = {
   resultPreview?: string;
   isError?: boolean;
   status: "running" | "done" | "error";
+  /** v0.1.39: wall-clock timing for the Event Stream Viewer + per-tool
+   *  duration pills. `startedAt` is set when the tool_use event arrives;
+   *  `durationMs` is computed on tool_result. Pattern lifted from
+   *  Agent TARS's runtime-stats / event-stream viewer. */
+  startedAt?: number;
+  durationMs?: number;
 };
 
 export type BatchAgent = {
@@ -38,8 +44,14 @@ export type BatchAgent = {
 export type ChatMessage = {
   role: "user" | "assistant" | "system";
   text: string;
+  /** v0.1.52: stamped onto assistant bubbles in chat:start so async
+   *  provenance traces can be attached when they arrive. */
+  turnId?: string;
   batch?: boolean;
   batchCount?: number;
+  /** v0.1.36: discriminates /batch (N different prompts) from /think
+   *  (N attempts at same prompt + reranker). Affects label rendering only. */
+  batchMode?: "batch" | "think";
   /** Tool calls observed during this assistant turn. v0.1.18. */
   tools?: ToolEvent[];
   /** Real parallel batch result, when this message is the assistant
@@ -48,6 +60,44 @@ export type ChatMessage = {
   batchAgents?: BatchAgent[];
   reconciled?: string;
   reconcilerStatus?: "pending" | "running" | "done" | "skipped";
+  /** v0.1.34: per-turn usage stats. Set on the assistant message
+   *  when its turn finishes. Renders as a footer pill. */
+  usage?: {
+    model: string;
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadTokens: number;
+    cost: number;
+    durationMs: number;
+    /** v0.1.42/v0.1.44: the permission mode the turn ran under.
+     *  - "ask"      → renderer shows "Approve & execute" button
+     *  - "preview"  → renderer shows "Review changes" card with snapshot ID
+     *  - "bypass"   → no special affordance (live execution, no safety net) */
+    permissionMode?: "ask" | "preview" | "bypass";
+    /** v0.1.44: APFS local snapshot ID for Preview-mode turns.
+     *  User can roll back via `tmutil restore`. */
+    previewSnapshot?: {
+      id: string;
+      fullName: string;
+      createdAt: number;
+    };
+  };
+  /** v0.1.38: explicit user feedback on the assistant message. Drives the
+   *  profile extractor — "down" turns route extracted preferences into
+   *  `anti_patterns` (avoid this); "up" turns reinforce `communication_style`
+   *  and other positive dimensions. Inspired by Fast-Slow Training (arxiv
+   *  2605.12484) — the "fast weight" half. The "slow weight" half (RL on
+   *  base model params) is out of scope; we wrap a frozen claude CLI. */
+  feedback?: "up" | "down";
+  /** v0.1.52: Provenance Panel trace. Surfaced under the assistant
+   *  message as a collapsible "show your work" panel — vault hits
+   *  (with graph-walk paths), memory hits, session-recall hits. The
+   *  keystone "senior-employee citation trail" feature. */
+  provenance?: ProvenanceTrace;
+  /** v0.1.54: First-person commitments extracted from the assistant
+   *  message ("I will ship by Friday"). Persisted as vault notes in
+   *  Commitments/; user can mark them resolved with an outcome. */
+  commitments?: Commitment[];
 };
 
 export type StreamEvent =

@@ -68,10 +68,54 @@ DIMENSION GUIDE:
 
 If nothing notable, output exactly: {"updates": []}`;
 
+// v0.1.38: feedback-aware system prompts. When the user explicitly thumbs-up
+// or thumbs-down the assistant's response, we mine the exchange differently.
+// Down → look for what the assistant did that the user disliked and store
+//        as anti_patterns ("Avoid X").
+// Up   → look for what the assistant did that worked and reinforce in
+//        communication_style or the relevant positive dimension.
+const SYSTEM_PROMPT_FEEDBACK_DOWN = `You are a profile extractor for Prism. The user gave a THUMBS-DOWN on this assistant turn — the response missed the mark.
+
+Your job: extract anti-patterns. Identify what the assistant did that the user is likely to dislike in future, unrelated conversations. Prefer:
+- The dimension "anti_patterns" with claims of the form "Avoid X" or "Don't Y".
+- High confidence (0.7+) because explicit thumbs-down is a strong signal.
+
+STRICT RULES:
+- Be specific about the failure mode (length, tone, depth, code-style, etc.) — not just "avoid this response."
+- Empty array is fine if the failure mode isn't generalizable.
+- Output JSON ONLY, no prose, no code fences.
+
+SCHEMA: same as the neutral extractor — {"updates": [{"dimension":"anti_patterns","claim":"...","confidence":0.0..1.0,"evidence":"..."}]}
+
+If nothing generalizable, output exactly: {"updates": []}`;
+
+const SYSTEM_PROMPT_FEEDBACK_UP = `You are a profile extractor for Prism. The user gave a THUMBS-UP on this assistant turn — the response worked well.
+
+Your job: reinforce what worked. Identify the assistant style/format/approach that the user prefers and would want in future, unrelated conversations.
+
+Prefer:
+- Dimensions "communication_style" (style of writing), "decision_style" (how decisions get framed), or "naming" (vocabulary) — wherever the working pattern lives.
+- High confidence (0.7+) because explicit thumbs-up is a strong signal.
+
+STRICT RULES:
+- Be specific about WHAT worked (terseness, code-first, structured headings, etc.) — not just "user liked this answer."
+- Empty array is fine if the working pattern isn't generalizable.
+- Output JSON ONLY, no prose, no code fences.
+
+SCHEMA: same as the neutral extractor.
+
+If nothing generalizable, output exactly: {"updates": []}`;
+
 type Job = {
   userMessage: string;
   assistantText: string;
   turnId: string;
+  /** v0.1.38: explicit user feedback on the assistant message. When
+   *  present, the extractor uses a feedback-aware prompt that biases
+   *  the dimension selection — "down" turns mine anti_patterns from
+   *  the assistant's failure mode; "up" turns reinforce
+   *  communication_style + whatever style the assistant used. */
+  feedback?: "up" | "down";
 };
 
 let inFlight: Job | null = null;
@@ -83,11 +127,40 @@ export function enqueueExtraction(job: Job): void {
   if (!job.userMessage || !job.assistantText) return;
   if (job.userMessage.length + job.assistantText.length < 80) return;
 
+  // v0.1.38: feedback jobs jump the queue. A user clicking thumbs is a
+  // high-signal moment; we want to extract from it immediately even if
+  // a passive extraction is already in flight. The passive job gets
+  // queued behind; feedback runs first.
+  if (job.feedback && inFlight) {
+    queued = job;
+    return;
+  }
   if (inFlight) {
     queued = job; // overwrite; only the latest matters
     return;
   }
   runJob(job);
+}
+
+/**
+ * v0.1.38: explicit feedback-driven re-extraction. Public entry point
+ * the IPC handler calls when the user clicks thumbs-up/down. Same job
+ * queue as the passive extractor — feedback is just a tagged job.
+ *
+ * The learning-paused gate is respected: if the user has paused profile
+ * learning, even explicit feedback doesn't write to the profile.
+ */
+export function enqueueFeedbackExtraction(args: {
+  userMessage: string;
+  assistantText: string;
+  feedback: "up" | "down";
+}): void {
+  enqueueExtraction({
+    userMessage: args.userMessage,
+    assistantText: args.assistantText,
+    feedback: args.feedback,
+    turnId: `fb-${Date.now().toString(36)}-${args.feedback}`,
+  });
 }
 
 function runJob(job: Job): void {
@@ -134,13 +207,21 @@ async function doExtract(job: Job): Promise<void> {
   const assistantTrimmed = job.assistantText.slice(0, 2000);
   const prompt = `USER:\n${userTrimmed}\n\nASSISTANT:\n${assistantTrimmed}`;
 
+  // v0.1.38: pick the system prompt based on feedback signal.
+  const systemPrompt =
+    job.feedback === "down"
+      ? SYSTEM_PROMPT_FEEDBACK_DOWN
+      : job.feedback === "up"
+        ? SYSTEM_PROMPT_FEEDBACK_UP
+        : SYSTEM_PROMPT;
+
   const args = [
     "--print",
     "--output-format", "json",
     "--model", "haiku",
     "--permission-mode", "bypassPermissions",
     "--allow-dangerously-skip-permissions",
-    "--append-system-prompt", SYSTEM_PROMPT,
+    "--append-system-prompt", systemPrompt,
     prompt,
   ];
 

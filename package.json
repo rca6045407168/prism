@@ -1,7 +1,7 @@
 {
   "name": "prism",
-  "version": "0.1.32",
-  "description": "Prism \u2014 type N prompts, get N parallel agents, reconciled into one answer.",
+  "version": "0.1.68",
+  "description": "Prism — type N prompts, get N parallel agents, reconciled into one answer.",
   "author": {
     "name": "Richard Chen",
     "email": "richard.chen@flexhaul.ai"
@@ -17,13 +17,14 @@
     "build": "npm run build:vite && npm run build:electron",
     "start": "electron .",
     "dist": "npm run build && electron-builder --mac --publish never",
-    "release": "npm run build && electron-builder --mac --publish always"
+    "release": "npm run build && electron-builder --mac --publish always && npm run release:rearm-asset",
+    "release:rearm-asset": "node -e \"const v=require('./package.json').version;const{execSync}=require('child_process');try{execSync('gh release upload v'+v+' release/latest-mac.yml --repo rca6045407168/prism --clobber',{stdio:'inherit'});console.log('[release:rearm-asset] latest-mac.yml force-overwritten for v'+v+' \\u2014 v0.1.39 bug never again')}catch(e){console.warn('[release:rearm-asset] non-fatal: '+e.message)}\""
   },
   "build": {
     "appId": "ai.prism.agent",
     "productName": "Prism",
     "afterPack": "./build/after-pack.js",
-    "copyright": "Copyright \u00a9 2026 Richard Chen. Includes open-source components \u2014 see Credits.",
+    "copyright": "Copyright © 2026 Richard Chen. Includes open-source components — see Credits.",
     "directories": {
       "output": "release",
       "buildResources": "build"

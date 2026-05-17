@@ -12,13 +12,16 @@
  *  - Run electron-updater on launch — checks GitHub Releases, prompts on
  *    update available, downloads in background, restarts to apply.
  */
-import { app, BrowserWindow, ipcMain, Menu, shell } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, protocol, shell, net } from "electron";
+import { pathToFileURL } from "url";
 import { autoUpdater } from "electron-updater";
 import log from "electron-log";
 import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
 import { registerSetup } from "./setup";
+import { registerVault } from "./vault";
+import { registerSessionSummary } from "./session-summary";
 import { registerClaudeClient } from "./claude-client";
 import {
   loadProfile,
@@ -26,8 +29,15 @@ import {
   removeEntry,
   clearAll,
 } from "./profile-store";
+import { enqueueFeedbackExtraction } from "./profile-extractor";
 import { listCommands, refreshCommandsCache } from "./commands";
 import { getStatus as getRtkStatus, enableHook as enableRtkHook } from "./rtk";
+import { detectOllama } from "./providers/ollama-detect";
+import { listScheduledJobs } from "./scheduled-jobs";
+import { registerProvenance } from "./provenance";
+import { registerCommitments } from "./commitments";
+import { prefetch as prefetchEmbedder } from "./embed";
+import { getVaultRoot, setVaultRoot, vaultLooksValid } from "./vault-config";
 import { signIn as oauthSignIn, isProviderConfigured } from "./oauth";
 import {
   loadAccount,
@@ -145,6 +155,31 @@ ipcMain.handle("prism:profile:clearAll", () => {
   clearAll();
   return loadProfile();
 });
+// v0.1.38: feedback-driven re-extraction. User clicks thumbs-up/down on an
+// assistant message → renderer fires this → extractor re-mines the turn
+// with the feedback-aware system prompt + writes to the right dimension.
+ipcMain.handle(
+  "prism:profile:extractWithFeedback",
+  (
+    _e,
+    params: {
+      userMessage: string;
+      assistantText: string;
+      feedback: "up" | "down";
+    },
+  ) => {
+    try {
+      enqueueFeedbackExtraction({
+        userMessage: String(params?.userMessage ?? ""),
+        assistantText: String(params?.assistantText ?? ""),
+        feedback: params?.feedback === "up" ? "up" : "down",
+      });
+      return { ok: true };
+    } catch (e: any) {
+      return { ok: false, error: e?.message ?? String(e) };
+    }
+  },
+);
 
 // ---------- slash commands / skills (v0.1.18) ----------
 ipcMain.handle("prism:commands:list", () => listCommands());
@@ -156,6 +191,63 @@ ipcMain.handle("prism:commands:refresh", () => {
 // ---------- RTK token saver (v0.1.19) ----------
 ipcMain.handle("prism:rtk:status", () => getRtkStatus());
 ipcMain.handle("prism:rtk:enableHook", () => enableRtkHook());
+
+// ---------- Providers (v0.1.50) ----------
+// Scaffolding only. Detects Ollama locally so Settings can surface it.
+// Future release will plug Ollama as a real streaming target.
+ipcMain.handle("prism:provider:detectOllama", () => detectOllama());
+
+// ---------- Vault config (v0.1.61) ----------
+// Single source of truth for where the Obsidian vault lives. Settings
+// → "Obsidian vault path" reads/writes through these handlers; every
+// vault-touching module imports getVaultRoot() directly so a change
+// here propagates without restart.
+ipcMain.handle("prism:vault:getRoot", () => {
+  const p = getVaultRoot();
+  return { path: p, ...vaultLooksValid(p) };
+});
+ipcMain.handle("prism:vault:setRoot", (_e, p: string) => setVaultRoot(p));
+ipcMain.handle("prism:vault:pickFolder", async () => {
+  const window = mainWindow;
+  const opts: Electron.OpenDialogOptions = {
+    title: "Pick your Obsidian vault folder",
+    defaultPath: getVaultRoot(),
+    properties: ["openDirectory", "createDirectory"],
+    buttonLabel: "Use this folder",
+  };
+  const result = window
+    ? await dialog.showOpenDialog(window, opts)
+    : await dialog.showOpenDialog(opts);
+  if (result.canceled || result.filePaths.length === 0) {
+    return { ok: false as const, canceled: true };
+  }
+  const picked = result.filePaths[0];
+  const setRes = setVaultRoot(picked);
+  if (!setRes.ok) return { ok: false as const, error: setRes.error };
+  return {
+    ok: true as const,
+    path: setRes.path,
+    ...vaultLooksValid(setRes.path),
+  };
+});
+
+// ---------- Clipboard fallback (v0.1.59) ----------
+// navigator.clipboard.writeText silently fails in Electron renderers
+// under focus/policy/CSP edge cases. Renderer falls back to this IPC
+// when the navigator API rejects.
+ipcMain.handle("prism:clipboard:write", (_e, text: string) => {
+  try {
+    clipboard.writeText(typeof text === "string" ? text : String(text));
+    return { ok: true };
+  } catch (e: any) {
+    return { ok: false, error: e?.message ?? String(e) };
+  }
+});
+
+// ---------- Scheduled jobs (v0.1.51) ----------
+// Read-only viewer over ~/Library/LaunchAgents/ for prism/claude/openclaw
+// LaunchAgents. Writer comes in a later release.
+ipcMain.handle("prism:scheduled:list", () => listScheduledJobs());
 
 // ---------- Window controls (v0.1.25) ----------
 ipcMain.handle("prism:window:setAlwaysOnTop", (_e, pinned: boolean) => {
@@ -237,6 +329,16 @@ ipcMain.handle("prism:account:signOut", () => {
   clearAccount();
   return { ok: true };
 });
+// v0.1.34: explicit restart-to-install when the user clicks the banner
+ipcMain.handle("flexhaul:installUpdate", () => {
+  try {
+    autoUpdater.quitAndInstall(false, true);
+    return { ok: true };
+  } catch (e: any) {
+    return { ok: false, error: e?.message ?? String(e) };
+  }
+});
+
 ipcMain.handle("flexhaul:checkForUpdates", async () => {
   try {
     const result = await autoUpdater.checkForUpdates();
@@ -353,11 +455,68 @@ function buildMenu() {
 
 // ---------- app lifecycle ----------
 
+// v0.1.33: register a custom scheme for inline image rendering. The
+// renderer paints `<img src="prism-img://<absolute-path>">` for files
+// the user has attached. We resolve the URL → disk path on this side
+// and gate it to <userData>/uploads/ so the renderer can't read
+// arbitrary files on the user's machine via the protocol.
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: "prism-img",
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      bypassCSP: true,
+    },
+  },
+]);
+
 app.whenReady().then(() => {
+  // Resolve `prism-img://<absolute-path>` → file on disk, scoped to the
+  // uploads dir. Path comes through as the URL's `pathname` + hostname
+  // joined (Electron splits "/Users/..." into host="users" + path="/...").
+  // We normalize by reconstructing the absolute path.
+  try {
+    protocol.handle("prism-img", async (request) => {
+      try {
+        const u = new URL(request.url);
+        // pathname starts with "/", host may have the first path segment
+        // depending on URL parsing. Rebuild as "/<host>/<rest>" when host
+        // is non-empty.
+        const reconstructed = u.host
+          ? `/${decodeURIComponent(u.host)}${decodeURIComponent(u.pathname)}`
+          : decodeURIComponent(u.pathname);
+        const uploadsDir = path.join(app.getPath("userData"), "uploads");
+        const resolved = path.resolve(reconstructed);
+        if (!resolved.startsWith(uploadsDir)) {
+          return new Response("forbidden", { status: 403 });
+        }
+        if (!fs.existsSync(resolved)) {
+          return new Response("not found", { status: 404 });
+        }
+        // Use Electron's net.fetch against a file:// URL so we get
+        // proper streaming + mime detection for free.
+        return net.fetch(pathToFileURL(resolved).toString());
+      } catch (e: any) {
+        return new Response(`error: ${e?.message ?? "unknown"}`, { status: 500 });
+      }
+    });
+  } catch (e) {
+    log.warn("prism-img protocol registration failed", e);
+  }
+
   createWindow();
   buildMenu();
   registerSetup(() => mainWindow);
   registerClaudeClient(() => mainWindow);
+  registerVault();
+  registerSessionSummary(() => mainWindow);
+  registerProvenance();
+  registerCommitments();
+  // v0.1.56: warm the MiniLM embedder at boot so the first provenance
+  // turn doesn't pay the 3-5s cold-start cost. Fire-and-forget.
+  prefetchEmbedder();
 
   // Kick off update check 5s after launch (non-blocking)…
   setTimeout(() => {
